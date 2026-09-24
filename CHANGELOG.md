@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 (fork)
+
+- Support Better Auth 1.7.x using `accountSubject` and `idToken`; retain existing Telegram OIDC `sub` account IDs.
+- Verify OIDC tokens before profile mapping in both code callbacks and direct ID-token sign-in; reject invalid signatures, claims, expiry, and supplied nonces.
+- Add a bounded JWKS fetch timeout (`oidc.jwksFetchTimeoutMs`, default 10 seconds).
+- Prevent profile mapping from redefining account identity.
+- Add real Better Auth HTTP integration tests for OIDC callbacks, existing accounts, direct sign-in, Widget/Mini App sessions, and account linking.
+- Raise the Better Auth peer dependency to `>=1.7.0 <1.8.0`. This release drops Better Auth 1.6 support.
+
+
 All notable changes to the better-auth-telegram plugin will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

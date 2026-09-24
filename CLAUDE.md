@@ -62,13 +62,13 @@ Single test file: `npx vitest run src/verify.test.ts`
 
 ## Dependencies
 
-**Runtime (peer):** `better-auth` (`>=1.6.22 <1.7.0`)
+**Runtime (peer):** `better-auth` (`>=1.7.0 <1.8.0`)
 
 **Build external:** `better-auth`, `zod` (tsup external)
 
 **Dev:** Biome, ultracite, tsup, TypeScript 5.9, Vitest 4, happy-dom
 
-**Node:** >= 22.0.0
+**Node:** >= 24.0.0
 
 ## Review Guidelines
 

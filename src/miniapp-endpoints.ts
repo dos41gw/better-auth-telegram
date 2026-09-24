@@ -1,6 +1,7 @@
 import type { User } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
+import { telegramAccountIssuer } from "./account-issuer";
 import { ERROR_CODES, PLUGIN_ID } from "./constants";
 import type { TelegramPluginConfig } from "./plugin-config";
 import type { TelegramAccountRecord } from "./types";
@@ -119,6 +120,7 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
             await ctx.context.adapter.create({
               model: "account",
               data: {
+                ...telegramAccountIssuer(ctx.context.tables ?? {}),
                 userId,
                 providerId: PLUGIN_ID,
                 accountId: miniAppUser.id.toString(),
@@ -143,6 +145,7 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
             await ctx.context.adapter.create({
               model: "account",
               data: {
+                ...telegramAccountIssuer(ctx.context.tables ?? {}),
                 userId: newUser.id,
                 providerId: PLUGIN_ID,
                 accountId: miniAppUser.id.toString(),

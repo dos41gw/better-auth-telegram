@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   release:
@@ -22,11 +21,13 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Use npm with trusted publishing support
-        run: npm install --global npm@11.18.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Type check
         run: npm run type-check
@@ -37,10 +38,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Pack fork release
+        run: bun pm pack --ignore-scripts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3.0.2
         with:
           generate_release_notes: true
+          files: "*.tgz"

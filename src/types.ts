@@ -98,11 +98,15 @@ export interface TelegramOIDCOptions {
    * @default false
    */
   enabled?: boolean;
+  /** Timeout for fetching Telegram signing keys, in milliseconds. @default 10000 */
+  jwksFetchTimeoutMs?: number;
 
   /**
    * Custom function to map OIDC claims to user object
    */
   mapOIDCProfileToUser?: (claims: TelegramOIDCClaims) => {
+    /** Account identity always comes from the verified OIDC sub claim. */
+    id?: never;
     name?: string;
     email?: string;
     image?: string;

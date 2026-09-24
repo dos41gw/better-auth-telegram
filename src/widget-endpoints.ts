@@ -5,6 +5,7 @@ import {
   sessionMiddleware,
 } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
+import { telegramAccountIssuer } from "./account-issuer";
 import { ERROR_CODES, PLUGIN_ID, SUCCESS_MESSAGES } from "./constants";
 import type { TelegramPluginConfig } from "./plugin-config";
 import type { TelegramAccountRecord, TelegramAuthData } from "./types";
@@ -103,6 +104,7 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
             await ctx.context.adapter.create({
               model: "account",
               data: {
+                ...telegramAccountIssuer(ctx.context.tables ?? {}),
                 userId,
                 providerId: PLUGIN_ID,
                 accountId: telegramData.id.toString(),
@@ -127,6 +129,7 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
             await ctx.context.adapter.create({
               model: "account",
               data: {
+                ...telegramAccountIssuer(ctx.context.tables ?? {}),
                 userId: newUser.id,
                 providerId: PLUGIN_ID,
                 accountId: telegramData.id.toString(),
@@ -244,6 +247,7 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
         await ctx.context.adapter.create({
           model: "account",
           data: {
+            ...telegramAccountIssuer(ctx.context.tables ?? {}),
             userId: session.user.id,
             providerId: PLUGIN_ID,
             accountId: telegramData.id.toString(),

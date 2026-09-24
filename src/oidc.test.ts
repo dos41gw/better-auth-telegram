@@ -4,6 +4,7 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import {
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -27,7 +28,8 @@ vi.mock("@better-fetch/fetch", () => ({
 }));
 
 // Mock @better-auth/core/oauth2
-vi.mock("@better-auth/core/oauth2", () => ({
+vi.mock("@better-auth/core/oauth2", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@better-auth/core/oauth2")>()),
   createAuthorizationURL: vi.fn(),
   validateAuthorizationCode: vi.fn(),
 }));
@@ -35,6 +37,7 @@ vi.mock("@better-auth/core/oauth2", () => ({
 import {
   createAuthorizationURL,
   validateAuthorizationCode,
+  verifyProviderIdToken,
 } from "@better-auth/core/oauth2";
 import { betterFetch } from "@better-fetch/fetch";
 
@@ -151,7 +154,7 @@ describe("createTelegramOIDCProvider", () => {
       expect(provider).toHaveProperty("createAuthorizationURL");
       expect(provider).toHaveProperty("validateAuthorizationCode");
       expect(provider).toHaveProperty("getUserInfo");
-      expect(provider).toHaveProperty("verifyIdToken");
+      expect(provider).toHaveProperty("idToken");
       expect(provider).toHaveProperty("options");
     });
 
@@ -172,7 +175,8 @@ describe("createTelegramOIDCProvider", () => {
       expect(typeof provider.createAuthorizationURL).toBe("function");
       expect(typeof provider.validateAuthorizationCode).toBe("function");
       expect(typeof provider.getUserInfo).toBe("function");
-      expect(typeof provider.verifyIdToken).toBe("function");
+      expect(provider.idToken).toBeDefined();
+      expect(typeof provider.accountSubject).toBe("function");
     });
 
     it("should set correct options with bot ID as clientId", () => {
@@ -219,6 +223,17 @@ describe("createTelegramOIDCProvider", () => {
       );
       warnSpy.mockRestore();
     });
+  });
+
+  it.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ])("rejects an invalid JWKS timeout %s", (jwksFetchTimeoutMs) => {
+    expect(() =>
+      createTelegramOIDCProvider(BOT_TOKEN, { jwksFetchTimeoutMs })
+    ).toThrow("positive finite number");
   });
 
   describe("Bot ID extraction", () => {
@@ -416,25 +431,38 @@ describe("createTelegramOIDCProvider", () => {
   });
 
   describe("getUserInfo", () => {
-    function createTestJWT(claims: Partial<TelegramOIDCClaims>): string {
-      const header = Buffer.from(
-        JSON.stringify({ alg: "RS256", typ: "JWT" })
-      ).toString("base64url");
-      const payload = Buffer.from(
-        JSON.stringify({
-          sub: "12345",
-          name: "John Doe",
-          picture: "https://example.com/photo.jpg",
-          preferred_username: "johndoe",
-          iss: TELEGRAM_OIDC_ISSUER,
-          aud: BOT_ID,
-          iat: Math.floor(Date.now() / 1000),
-          exp: Math.floor(Date.now() / 1000) + 3600,
-          ...claims,
-        })
-      ).toString("base64url");
-      const signature = Buffer.from("fake-signature").toString("base64url");
-      return `${header}.${payload}.${signature}`;
+    let keyPair: Awaited<ReturnType<typeof generateKeyPair>>;
+    let publicJwk: Awaited<ReturnType<typeof exportJWK>>;
+    beforeAll(async () => {
+      keyPair = await generateKeyPair("RS256");
+      publicJwk = {
+        ...(await exportJWK(keyPair.publicKey)),
+        kid: "profile-key",
+        alg: "RS256",
+      };
+    });
+    beforeEach(() => {
+      mockedBetterFetch.mockResolvedValue({
+        data: { keys: [publicJwk] },
+        error: null,
+      });
+    });
+    function createTestJWT(
+      claims: Partial<TelegramOIDCClaims>
+    ): Promise<string> {
+      return new SignJWT({
+        sub: "12345",
+        name: "John Doe",
+        picture: "https://example.com/photo.jpg",
+        preferred_username: "johndoe",
+        ...claims,
+      })
+        .setProtectedHeader({ alg: "RS256", kid: "profile-key" })
+        .setIssuer(TELEGRAM_OIDC_ISSUER)
+        .setAudience(BOT_ID)
+        .setIssuedAt()
+        .setExpirationTime("1h")
+        .sign(keyPair.privateKey);
     }
 
     it("should return null when no idToken is provided", async () => {
@@ -446,8 +474,8 @@ describe("createTelegramOIDCProvider", () => {
       expect(result).toBeNull();
     });
 
-    it("should decode JWT and map claims to user info", async () => {
-      const idToken = createTestJWT({
+    it("should verify JWT and map claims to user info", async () => {
+      const idToken = await createTestJWT({
         sub: "99999",
         name: "Alice Smith",
         picture: "https://example.com/alice.jpg",
@@ -458,7 +486,7 @@ describe("createTelegramOIDCProvider", () => {
       const result = await provider.getUserInfo({ idToken });
 
       expect(result).not.toBeNull();
-      expect(result!.user.id).toBe("99999");
+      expect(result!.data.sub).toBe("99999");
       expect(result!.user.name).toBe("Alice Smith");
       expect(result!.user.image).toBe("https://example.com/alice.jpg");
       expect(result!.user.emailVerified).toBe(false);
@@ -466,7 +494,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return claims as data", async () => {
-      const idToken = createTestJWT({
+      const idToken = await createTestJWT({
         sub: "12345",
         preferred_username: "johndoe",
         phone_number: "+1234567890",
@@ -481,7 +509,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should handle missing optional claims", async () => {
-      const idToken = createTestJWT({
+      const idToken = await createTestJWT({
         sub: "12345",
         name: undefined,
         picture: undefined,
@@ -492,13 +520,13 @@ describe("createTelegramOIDCProvider", () => {
       const result = await provider.getUserInfo({ idToken });
 
       expect(result).not.toBeNull();
-      expect(result!.user.id).toBe("12345");
+      expect(result!.data.sub).toBe("12345");
       expect(result!.user.name).toBeUndefined();
       expect(result!.user.image).toBeUndefined();
     });
 
     it("should always set emailVerified to false", async () => {
-      const idToken = createTestJWT({ sub: "12345" });
+      const idToken = await createTestJWT({ sub: "12345" });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
       const result = await provider.getUserInfo({ idToken });
@@ -507,7 +535,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should generate placeholder email from telegram sub", async () => {
-      const idToken = createTestJWT({ sub: "12345" });
+      const idToken = await createTestJWT({ sub: "12345" });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
       const result = await provider.getUserInfo({ idToken });
@@ -523,20 +551,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return null when JWT has no sub claim", async () => {
-      const header = Buffer.from(
-        JSON.stringify({ alg: "RS256", typ: "JWT" })
-      ).toString("base64url");
-      const payload = Buffer.from(
-        JSON.stringify({
-          name: "No Sub User",
-          iss: TELEGRAM_OIDC_ISSUER,
-          aud: BOT_ID,
-          iat: Math.floor(Date.now() / 1000),
-          exp: Math.floor(Date.now() / 1000) + 3600,
-        })
-      ).toString("base64url");
-      const signature = Buffer.from("fake-signature").toString("base64url");
-      const idToken = `${header}.${payload}.${signature}`;
+      const idToken = await createTestJWT({ sub: undefined });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
       const result = await provider.getUserInfo({ idToken });
@@ -545,7 +560,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should use mapOIDCProfileToUser when provided", async () => {
-      const idToken = createTestJWT({
+      const idToken = await createTestJWT({
         sub: "12345",
         name: "Original Name",
         preferred_username: "original",
@@ -567,7 +582,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should override default fields with mapOIDCProfileToUser result", async () => {
-      const idToken = createTestJWT({
+      const idToken = await createTestJWT({
         sub: "12345",
         name: "Original",
       });
@@ -581,11 +596,11 @@ describe("createTelegramOIDCProvider", () => {
       const result = await provider.getUserInfo({ idToken });
 
       expect(result!.user.name).toBe("Overridden");
-      expect(result!.user.id).toBe("12345");
+      expect(result!.data.sub).toBe("12345");
     });
 
     it("should still include standard fields when mapOIDCProfileToUser is provided", async () => {
-      const idToken = createTestJWT({
+      const idToken = await createTestJWT({
         sub: "12345",
         name: "Alice",
         picture: "https://example.com/pic.jpg",
@@ -600,7 +615,7 @@ describe("createTelegramOIDCProvider", () => {
       const result = await provider.getUserInfo({ idToken });
 
       // mapOIDCProfileToUser overrides spread last
-      expect(result!.user.id).toBe("12345");
+      expect(result!.data.sub).toBe("12345");
       expect(result!.user.emailVerified).toBe(false);
     });
   });
@@ -644,10 +659,13 @@ describe("createTelegramOIDCProvider", () => {
       });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(token);
+      const result = await verifyProviderIdToken(provider, token);
 
       expect(result).toBe(true);
-      expect(mockedBetterFetch).toHaveBeenCalledWith(TELEGRAM_OIDC_JWKS_URI);
+      expect(mockedBetterFetch).toHaveBeenCalledWith(TELEGRAM_OIDC_JWKS_URI, {
+        timeout: 10000,
+        retry: 0,
+      });
     });
 
     it.each([
@@ -679,7 +697,7 @@ describe("createTelegramOIDCProvider", () => {
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
 
-      await expect(provider.verifyIdToken!(token)).resolves.toBe(true);
+      await expect(verifyProviderIdToken(provider, token)).resolves.toBe(true);
     });
 
     it("should return false when JWT header has no kid", async () => {
@@ -694,7 +712,7 @@ describe("createTelegramOIDCProvider", () => {
       const signedToken = await token.sign(rsaKeyPair.privateKey);
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(signedToken);
+      const result = await verifyProviderIdToken(provider, signedToken);
 
       expect(result).toBe(false);
     });
@@ -714,7 +732,7 @@ describe("createTelegramOIDCProvider", () => {
       const token = `${header}.${payload}.invalid-signature`;
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(token);
+      const result = await verifyProviderIdToken(provider, token);
 
       expect(result).toBe(false);
       expect(mockedBetterFetch).not.toHaveBeenCalled();
@@ -726,7 +744,7 @@ describe("createTelegramOIDCProvider", () => {
         clientSecret: "oidc-secret",
       });
 
-      await expect(provider.verifyIdToken!(token)).resolves.toBe(false);
+      await expect(verifyProviderIdToken(provider, token)).resolves.toBe(false);
       expect(mockedBetterFetch).not.toHaveBeenCalled();
     });
 
@@ -737,7 +755,7 @@ describe("createTelegramOIDCProvider", () => {
 
       const token = await createSignedJWT({ sub: "12345" });
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(token);
+      const result = await verifyProviderIdToken(provider, token);
 
       expect(result).toBe(false);
     });
@@ -755,7 +773,7 @@ describe("createTelegramOIDCProvider", () => {
       const token = await createSignedJWT({ sub: "12345" });
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
 
-      await expect(provider.verifyIdToken!(token)).resolves.toBe(true);
+      await expect(verifyProviderIdToken(provider, token)).resolves.toBe(true);
     });
 
     it("should return false when JWKS fetch fails", async () => {
@@ -766,7 +784,7 @@ describe("createTelegramOIDCProvider", () => {
       const token = await createSignedJWT({ sub: "12345" });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(token);
+      const result = await verifyProviderIdToken(provider, token);
       expect(result).toBe(false);
     });
 
@@ -780,7 +798,7 @@ describe("createTelegramOIDCProvider", () => {
       const token = await createSignedJWT({ sub: "12345" });
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(token);
+      const result = await verifyProviderIdToken(provider, token);
       expect(result).toBe(false);
     });
 
@@ -799,7 +817,7 @@ describe("createTelegramOIDCProvider", () => {
       const signedToken = await token.sign(rsaKeyPair.privateKey);
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(signedToken);
+      const result = await verifyProviderIdToken(provider, signedToken);
       expect(result).toBe(false);
     });
 
@@ -818,7 +836,7 @@ describe("createTelegramOIDCProvider", () => {
       const signedToken = await token.sign(rsaKeyPair.privateKey);
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(signedToken);
+      const result = await verifyProviderIdToken(provider, signedToken);
       expect(result).toBe(false);
     });
 
@@ -837,7 +855,7 @@ describe("createTelegramOIDCProvider", () => {
       const signedToken = await token.sign(rsaKeyPair.privateKey);
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(signedToken);
+      const result = await verifyProviderIdToken(provider, signedToken);
       expect(result).toBe(false);
     });
 
@@ -859,7 +877,7 @@ describe("createTelegramOIDCProvider", () => {
       const signedToken = await token.sign(otherKeyPair.privateKey);
 
       const provider = createTelegramOIDCProvider(BOT_TOKEN);
-      const result = await provider.verifyIdToken!(signedToken);
+      const result = await verifyProviderIdToken(provider, signedToken);
       expect(result).toBe(false);
     });
   });

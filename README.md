@@ -1,5 +1,7 @@
 # Better Auth Telegram
 
+Fork maintained at [dos41gw/better-auth-telegram](https://github.com/dos41gw/better-auth-telegram), based on [vcode-sh/better-auth-telegram](https://github.com/vcode-sh/better-auth-telegram). This fork targets Better Auth 1.7.x. The upstream npm package does not include these changes.
+
 [![npm version](https://img.shields.io/npm/v/better-auth-telegram)](https://www.npmjs.com/package/better-auth-telegram)
 [![npm downloads](https://img.shields.io/npm/dm/better-auth-telegram)](https://www.npmjs.com/package/better-auth-telegram)
 [![CI](https://github.com/vcode-sh/better-auth-telegram/actions/workflows/ci.yml/badge.svg)](https://github.com/vcode-sh/better-auth-telegram/actions/workflows/ci.yml)
@@ -10,17 +12,26 @@ Telegram authentication plugin for [Better Auth](https://better-auth.com). Login
 
 Built on Web Crypto API — works in Node, Bun, Cloudflare Workers, and whatever edge runtime you're pretending to need. No `node:crypto` tantrums.
 
-344 tests. If it breaks, roast me on [X](https://x.com/vcode_sh). If it works, also roast me. I'm there either way, posting through the pain.
+360 tests. If it breaks, roast me on [X](https://x.com/vcode_sh). If it works, also roast me. I'm there either way, posting through the pain.
 
 ## Requirements
 
-- Node.js >= 22 (or Bun, or any runtime with Web Crypto API)
-- `better-auth@>=1.6.22 <1.7.0`
+- Node.js >= 24 (or Bun, or any runtime with Web Crypto API)
+- `better-auth@>=1.7.0 <1.8.0`
+
+## Upgrading to this fork (3.0.0)
+
+- Use Better Auth `>=1.7.0 <1.8.0`; the integration tests cover 1.7.0 and 1.7.6.
+- OIDC uses Better Auth's `accountSubject` and `idToken` contracts. Account IDs remain the verified Telegram `sub`; existing `telegram-oidc` accounts do not need re-keying.
+- `mapOIDCProfileToUser` maps local profile fields only. Returning `id` is no longer supported and cannot change account identity.
+- Both the OAuth callback and direct ID-token sign-in verify signatures, issuer, audience, expiry, and required claims before mapping a user. Direct ID-token nonces are checked when supplied.
+- `oidc.jwksFetchTimeoutMs` bounds signing-key requests (default: 10,000 ms).
+- Follow Better Auth's schema migration/backfill instructions for your chosen version. Early 1.7 releases require `account.issuer`: existing Widget/Mini App accounts use `local:oauth:telegram` and OIDC accounts use `local:oauth:telegram-oidc`. The plugin fills the Widget/Mini App issuer on new writes only when the installed Better Auth schema requires it. Version 1.7.6 no longer has this field. No migration runs automatically.
 
 ## Install
 
 ```bash
-npm install better-auth-telegram
+npm install github:dos41gw/better-auth-telegram#codex/better-auth-1.7
 ```
 
 ## Setup
@@ -310,7 +321,7 @@ See [`examples/nextjs-app/`](./examples/nextjs-app) for a Next.js implementation
 
 ### To v2.0.0 (from v1.5.0)
 
-- Upgrade Better Auth to `>=1.6.22 <1.7.0`. Better Auth 1.7 is not supported by this release.
+- Upstream v2.0 required Better Auth `>=1.6.22 <1.7.0`. For this fork, follow the 3.0.0 upgrade notes above.
 - `botToken` and `botUsername` are now flow-aware. Missing values log setup warnings; the affected Widget, Mini App, or OIDC operation rejects if the credential is still missing when used.
 - OIDC-only setups can omit both bot fields when `oidc.clientId` and `oidc.clientSecret` are configured explicitly.
 

@@ -4,14 +4,14 @@ You want Telegram auth in your app. Bold choice. Let's get it done without a twe
 
 ## Prerequisites
 
-- Node.js >= 22
-- A [Better Auth](https://www.better-auth.com/) project (`>=1.6.22 <1.7.0`)
+- Node.js >= 24
+- A [Better Auth](https://www.better-auth.com/) project (`>=1.7.0 <1.8.0`)
 - A Telegram account (shocking, I know)
 
 ## Install
 
 ```bash
-npm install better-auth-telegram
+npm install github:dos41gw/better-auth-telegram#codex/better-auth-1.7
 ```
 
 Works with pnpm, yarn, bun -- whatever you've pledged allegiance to this month.
