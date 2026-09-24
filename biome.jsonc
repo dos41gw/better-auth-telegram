@@ -1,8 +1,6 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": [
-    "ultracite/core"
-  ],
+  "extends": ["ultracite/core"],
   "linter": {
     "rules": {
       "style": {
@@ -30,10 +28,6 @@
     }
   },
   "files": {
-    "includes": [
-      "**",
-      "!dist/**",
-      "!coverage/**"
-    ]
+    "includes": ["**", "!dist", "!coverage"]
   }
 }
