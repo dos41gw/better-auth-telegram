@@ -31,8 +31,10 @@ Built on Web Crypto API — works in Node, Bun, Cloudflare Workers, and whatever
 ## Install
 
 ```bash
-npm install github:dos41gw/better-auth-telegram#codex/better-auth-1.7
+bun add github:dos41gw/better-auth-telegram#codex/better-auth-1.7
 ```
+
+The fork commits its built `dist/` exports so Git installs work without running dependency build scripts or installing development tools. CI rebuilds and checks that these files match the source. Pin a commit SHA instead of a branch for reproducible application installs.
 
 ## Setup
 

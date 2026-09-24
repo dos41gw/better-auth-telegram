@@ -42,8 +42,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "ultracite check",
     "lint:fix": "ultracite fix",
-    "prepublishOnly": "npm run type-check && npm run test && npm run build",
-    "prepare": "tsup"
+    "prepublishOnly": "npm run type-check && npm run test && npm run build"
   },
   "keywords": [
     "better-auth",

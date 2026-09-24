@@ -95,6 +95,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify committed build matches source
+        run: git diff --exit-code -- dist
+
       - name: Verify dist artifacts
         run: |
           {
