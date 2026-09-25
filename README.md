@@ -12,26 +12,33 @@ Telegram authentication plugin for [Better Auth](https://better-auth.com). Login
 
 Built on Web Crypto API — works in Node, Bun, Cloudflare Workers, and whatever edge runtime you're pretending to need. No `node:crypto` tantrums.
 
-360 tests. If it breaks, roast me on [X](https://x.com/vcode_sh). If it works, also roast me. I'm there either way, posting through the pain.
+Security and compatibility checks include real Better Auth HTTP handlers, SQLite, signed OIDC tokens, and the client session store. See the [audit and migration guide](docs/security-compatibility-audit.md).
 
 ## Requirements
 
 - Node.js >= 24 (or Bun, or any runtime with Web Crypto API)
 - `better-auth@>=1.7.0 <1.8.0`
 
-## Upgrading to this fork (3.0.0)
+## Upgrading to this fork (4.0.0)
+
+**Breaking security changes:** migrate unique nullable `user.telegramId` and `account.telegramId` constraints before deploying. Resolve duplicates and backfill existing Telegram account metadata first. Never auto-merge users by Telegram metadata or placeholder email. See the [migration guide](docs/security-compatibility-audit.md#migration-from-3x).
+
+- `miniApp.validateInitData: false` is rejected; signatures are always required.
+- Widget/Mini App provisioning now runs Better Auth database hooks and user validation. Hidden fields stay hidden.
+- Link/unlink require a fresh, authoritative session. Linking honors core account-linking settings; unlinking the last account requires explicit `allowUnlinkingAll`.
+- OIDC supports signup/ID-token policies, nonce opt-in, login hints, and additional authorization parameters. Session-aware client actions refresh the session store.
 
 - Use Better Auth `>=1.7.0 <1.8.0`; the integration tests cover 1.7.0 and 1.7.6.
 - OIDC uses Better Auth's `accountSubject` and `idToken` contracts. Account IDs remain the verified Telegram `sub`; existing `telegram-oidc` accounts do not need re-keying.
 - `mapOIDCProfileToUser` maps local profile fields only. Returning `id` is no longer supported and cannot change account identity.
 - Both the OAuth callback and direct ID-token sign-in verify signatures, issuer, audience, expiry, and required claims before mapping a user. Direct ID-token nonces are checked when supplied.
 - `oidc.jwksFetchTimeoutMs` bounds signing-key requests (default: 10,000 ms).
-- Follow Better Auth's schema migration/backfill instructions for your chosen version. Early 1.7 releases require `account.issuer`: existing Widget/Mini App accounts use `local:oauth:telegram` and OIDC accounts use `local:oauth:telegram-oidc`. The plugin fills the Widget/Mini App issuer on new writes only when the installed Better Auth schema requires it. Version 1.7.6 no longer has this field. No migration runs automatically.
+- Follow Better Auth's schema migration/backfill instructions for your chosen version. Early 1.7 releases require `account.issuer`: existing Widget/Mini App accounts use `local:oauth:telegram` and OIDC accounts use `local:oauth:telegram-oidc`. The plugin supplies the legacy Widget/Mini App issuer; adapters omit it when absent from the installed schema. Version 1.7.6 no longer has this field. No migration runs automatically.
 
 ## Install
 
 ```bash
-bun add github:dos41gw/better-auth-telegram#codex/better-auth-1.7
+bun add github:dos41gw/better-auth-telegram#main
 ```
 
 The fork commits its built `dist/` exports so Git installs work without running dependency build scripts or installing development tools. CI rebuilds and checks that these files match the source. Pin a commit SHA instead of a branch for reproducible application installs.
@@ -248,7 +255,7 @@ telegram({
 | `loginWidget` | `true` | Enable Login Widget endpoints and schema fields |
 | `mapTelegramDataToUser` | — | Custom user data mapper |
 | `miniApp.enabled` | `false` | Enable Mini Apps endpoints |
-| `miniApp.validateInitData` | `true` | Verify Mini App initData |
+| `miniApp.validateInitData` | `true` | Must remain enabled; `false` is rejected |
 | `miniApp.allowAutoSignin` | `true` | Allow auto sign-in from Mini Apps |
 | `miniApp.mapMiniAppDataToUser` | — | Custom Mini App user mapper |
 | `oidc.enabled` | `false` | Enable Telegram OIDC flow |
@@ -323,7 +330,7 @@ See [`examples/nextjs-app/`](./examples/nextjs-app) for a Next.js implementation
 
 ### To v2.0.0 (from v1.5.0)
 
-- Upstream v2.0 required Better Auth `>=1.6.22 <1.7.0`. For this fork, follow the 3.0.0 upgrade notes above.
+- Upstream v2.0 required Better Auth `>=1.6.22 <1.7.0`. For this fork, follow the 4.0.0 upgrade notes above.
 - `botToken` and `botUsername` are now flow-aware. Missing values log setup warnings; the affected Widget, Mini App, or OIDC operation rejects if the credential is still missing when used.
 - OIDC-only setups can omit both bot fields when `oidc.clientId` and `oidc.clientSecret` are configured explicitly.
 

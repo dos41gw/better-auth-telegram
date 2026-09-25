@@ -21,7 +21,7 @@ export function createTelegramSchema(
         telegramId: {
           type: "string",
           required: false,
-          unique: false,
+          unique: true,
           input: false,
         },
         telegramPhoneNumber: {
@@ -43,12 +43,14 @@ export function createTelegramSchema(
         telegramId: {
           type: "string",
           required: false,
-          unique: false,
+          unique: true,
+          input: false,
         },
         telegramUsername: {
           type: "string",
           required: false,
           unique: false,
+          input: false,
         },
       },
     },

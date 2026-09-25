@@ -31,13 +31,39 @@ async function sha256(data: string): Promise<ArrayBuffer> {
   );
 }
 
-/**
- * Converts an ArrayBuffer to a lowercase hex string
- */
-function bufferToHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+const hashPattern = /^[a-f0-9]{64}$/i;
+const integerPattern = /^\d+$/;
+
+function validTime(value: number, maxAge: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  return (
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    Number.isFinite(maxAge) &&
+    maxAge > 0 &&
+    value <= now + 30 &&
+    now - value <= maxAge
+  );
+}
+
+async function verifyHmac(key: Uint8Array, data: string, hash: string) {
+  if (!hashPattern.test(hash)) return false;
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key as BufferSource,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const signature = Uint8Array.from(hash.match(/.{2}/g)!, (byte) =>
+    Number.parseInt(byte, 16)
+  );
+  return crypto.subtle.verify(
+    "HMAC",
+    cryptoKey,
+    signature,
+    encoder.encode(data)
+  );
 }
 
 /**
@@ -52,14 +78,14 @@ export async function verifyTelegramAuth(
   botToken: string,
   maxAge = DEFAULT_MAX_AUTH_AGE
 ): Promise<boolean> {
+  if (!validateTelegramAuthData(data) || !botToken) return false;
   // Extract hash from data
   const { hash, ...dataWithoutHash } = data;
 
   // Check auth_date is not too old
   const authDate = dataWithoutHash.auth_date;
-  const currentTime = Math.floor(Date.now() / 1000);
 
-  if (currentTime - authDate > maxAge) {
+  if (!validTime(authDate, maxAge)) {
     return false;
   }
 
@@ -75,11 +101,7 @@ export async function verifyTelegramAuth(
   // Create secret key: SHA256(bot_token)
   const secretKey = new Uint8Array(await sha256(botToken));
 
-  // Calculate HMAC-SHA256
-  const hmac = bufferToHex(await hmacSha256(secretKey, dataCheckString));
-
-  // Compare with received hash
-  return hmac === hash;
+  return verifyHmac(secretKey, dataCheckString, hash);
 }
 
 /**
@@ -89,9 +111,14 @@ export function validateTelegramAuthData(data: any): data is TelegramAuthData {
   return (
     typeof data === "object" &&
     data !== null &&
-    typeof data.id === "number" &&
+    Number.isSafeInteger(data.id) &&
+    data.id > 0 &&
     typeof data.first_name === "string" &&
-    typeof data.auth_date === "number" &&
+    [data.last_name, data.username, data.photo_url].every(
+      (value) => value === undefined || typeof value === "string"
+    ) &&
+    Number.isSafeInteger(data.auth_date) &&
+    data.auth_date > 0 &&
     typeof data.hash === "string"
   );
 }
@@ -103,9 +130,11 @@ export function validateTelegramAuthData(data: any): data is TelegramAuthData {
  */
 export function parseMiniAppInitData(initData: string): TelegramMiniAppData {
   const params = new URLSearchParams(initData);
-  const data: Partial<TelegramMiniAppData> & Record<string, unknown> = {};
+  const data: Partial<TelegramMiniAppData> & Record<string, unknown> =
+    Object.create(null);
 
   for (const [key, value] of params.entries()) {
+    if (["__proto__", "prototype", "constructor"].includes(key)) continue;
     if (key === "user" || key === "receiver" || key === "chat") {
       // Parse JSON objects
       try {
@@ -135,7 +164,11 @@ export async function verifyMiniAppInitData(
   botToken: string,
   maxAge = DEFAULT_MAX_AUTH_AGE
 ): Promise<boolean> {
+  if (typeof initData !== "string" || initData.length > 16384 || !botToken)
+    return false;
   const params = new URLSearchParams(initData);
+  const keys = [...params.keys()];
+  if (new Set(keys).size !== keys.length) return false;
   const hash = params.get("hash");
 
   if (!hash) {
@@ -147,20 +180,19 @@ export async function verifyMiniAppInitData(
 
   // Check auth_date
   const authDate = params.get("auth_date");
-  if (!authDate) {
+  if (!authDate || !integerPattern.test(authDate)) {
     return false;
   }
 
   const authDateNum = Number(authDate);
-  const currentTime = Math.floor(Date.now() / 1000);
 
-  if (currentTime - authDateNum > maxAge) {
+  if (!validTime(authDateNum, maxAge)) {
     return false;
   }
 
   // Create data-check-string (sorted alphabetically)
   const dataCheckString = Array.from(params.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 
@@ -169,13 +201,7 @@ export async function verifyMiniAppInitData(
     await hmacSha256(encoder.encode("WebAppData"), botToken)
   );
 
-  // Calculate HMAC-SHA256
-  const calculatedHash = bufferToHex(
-    await hmacSha256(secretKey, dataCheckString)
-  );
-
-  // Compare with received hash
-  return calculatedHash === hash;
+  return verifyHmac(secretKey, dataCheckString, hash);
 }
 
 /**
@@ -185,11 +211,17 @@ export function validateMiniAppData(data: any): data is TelegramMiniAppData {
   return (
     typeof data === "object" &&
     data !== null &&
-    typeof data.auth_date === "number" &&
+    Number.isSafeInteger(data.auth_date) &&
+    data.auth_date > 0 &&
     typeof data.hash === "string" &&
     (data.user === undefined ||
       (typeof data.user === "object" &&
-        typeof data.user.id === "number" &&
-        typeof data.user.first_name === "string"))
+        data.user !== null &&
+        Number.isSafeInteger(data.user.id) &&
+        data.user.id > 0 &&
+        typeof data.user.first_name === "string" &&
+        [data.user.last_name, data.user.username, data.user.photo_url].every(
+          (value) => value === undefined || typeof value === "string"
+        )))
   );
 }

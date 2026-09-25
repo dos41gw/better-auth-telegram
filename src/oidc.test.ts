@@ -22,11 +22,6 @@ import {
 import { buildScopes, createTelegramOIDCProvider } from "./oidc";
 import type { TelegramOIDCClaims } from "./types";
 
-// Mock @better-fetch/fetch
-vi.mock("@better-fetch/fetch", () => ({
-  betterFetch: vi.fn(),
-}));
-
 // Mock @better-auth/core/oauth2
 vi.mock("@better-auth/core/oauth2", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@better-auth/core/oauth2")>()),
@@ -39,9 +34,8 @@ import {
   validateAuthorizationCode,
   verifyProviderIdToken,
 } from "@better-auth/core/oauth2";
-import { betterFetch } from "@better-fetch/fetch";
 
-const mockedBetterFetch = vi.mocked(betterFetch);
+const mockJWKS = vi.fn();
 const mockedCreateAuthorizationURL = vi.mocked(createAuthorizationURL);
 const mockedValidateAuthorizationCode = vi.mocked(validateAuthorizationCode);
 
@@ -139,6 +133,12 @@ describe("buildScopes", () => {
 describe("createTelegramOIDCProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const result = await mockJWKS(String(url));
+      return Response.json(result?.data ?? {}, {
+        status: result?.error ? 503 : 200,
+      });
+    });
   });
 
   afterEach(() => {
@@ -225,16 +225,14 @@ describe("createTelegramOIDCProvider", () => {
     });
   });
 
-  it.each([
-    0,
-    -1,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-  ])("rejects an invalid JWKS timeout %s", (jwksFetchTimeoutMs) => {
-    expect(() =>
-      createTelegramOIDCProvider(BOT_TOKEN, { jwksFetchTimeoutMs })
-    ).toThrow("positive finite number");
-  });
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects an invalid JWKS timeout %s",
+    (jwksFetchTimeoutMs) => {
+      expect(() =>
+        createTelegramOIDCProvider(BOT_TOKEN, { jwksFetchTimeoutMs })
+      ).toThrow("positive finite number");
+    }
+  );
 
   describe("Bot ID extraction", () => {
     it("should extract bot ID from standard token format", () => {
@@ -401,6 +399,7 @@ describe("createTelegramOIDCProvider", () => {
           clientSecret: BOT_TOKEN,
         },
         tokenEndpoint: TELEGRAM_OIDC_TOKEN_ENDPOINT,
+        authentication: "basic",
       });
 
       expect(result).toBe(mockTokens);
@@ -442,7 +441,7 @@ describe("createTelegramOIDCProvider", () => {
       };
     });
     beforeEach(() => {
-      mockedBetterFetch.mockResolvedValue({
+      mockJWKS.mockResolvedValue({
         data: { keys: [publicJwk] },
         error: null,
       });
@@ -649,7 +648,7 @@ describe("createTelegramOIDCProvider", () => {
     }
 
     it("should verify a valid JWT token", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: { keys: [jwk] },
       } as any);
 
@@ -662,43 +661,42 @@ describe("createTelegramOIDCProvider", () => {
       const result = await verifyProviderIdToken(provider, token);
 
       expect(result).toBe(true);
-      expect(mockedBetterFetch).toHaveBeenCalledWith(TELEGRAM_OIDC_JWKS_URI, {
-        timeout: 10000,
-        retry: 0,
-      });
+      expect(mockJWKS).toHaveBeenCalledWith(TELEGRAM_OIDC_JWKS_URI);
     });
 
-    it.each([
-      "ES256",
-      "EdDSA",
-    ] as const)("should verify a valid %s JWT token", async (algorithm) => {
-      const keyPair = await generateKeyPair(algorithm);
-      const exportedJwk = await exportJWK(keyPair.publicKey);
-      mockedBetterFetch.mockResolvedValueOnce({
-        data: {
-          keys: [
-            {
-              ...exportedJwk,
-              kid: "algorithm-test-kid",
-              alg: algorithm,
-              use: "sig",
-            },
-          ],
-        },
-      } as any);
+    it.each(["ES256", "EdDSA"] as const)(
+      "should verify a valid %s JWT token",
+      async (algorithm) => {
+        const keyPair = await generateKeyPair(algorithm);
+        const exportedJwk = await exportJWK(keyPair.publicKey);
+        mockJWKS.mockResolvedValueOnce({
+          data: {
+            keys: [
+              {
+                ...exportedJwk,
+                kid: "algorithm-test-kid",
+                alg: algorithm,
+                use: "sig",
+              },
+            ],
+          },
+        } as any);
 
-      const token = await new SignJWT({ sub: "12345" })
-        .setProtectedHeader({ alg: algorithm, kid: "algorithm-test-kid" })
-        .setIssuedAt()
-        .setExpirationTime("1h")
-        .setIssuer(TELEGRAM_OIDC_ISSUER)
-        .setAudience(BOT_ID)
-        .sign(keyPair.privateKey);
+        const token = await new SignJWT({ sub: "12345" })
+          .setProtectedHeader({ alg: algorithm, kid: "algorithm-test-kid" })
+          .setIssuedAt()
+          .setExpirationTime("1h")
+          .setIssuer(TELEGRAM_OIDC_ISSUER)
+          .setAudience(BOT_ID)
+          .sign(keyPair.privateKey);
 
-      const provider = createTelegramOIDCProvider(BOT_TOKEN);
+        const provider = createTelegramOIDCProvider(BOT_TOKEN);
 
-      await expect(verifyProviderIdToken(provider, token)).resolves.toBe(true);
-    });
+        await expect(verifyProviderIdToken(provider, token)).resolves.toBe(
+          true
+        );
+      }
+    );
 
     it("should return false when JWT header has no kid", async () => {
       // Create a JWT without kid in header
@@ -735,7 +733,7 @@ describe("createTelegramOIDCProvider", () => {
       const result = await verifyProviderIdToken(provider, token);
 
       expect(result).toBe(false);
-      expect(mockedBetterFetch).not.toHaveBeenCalled();
+      expect(mockJWKS).not.toHaveBeenCalled();
     });
 
     it("should reject token verification when clientId is missing", async () => {
@@ -745,12 +743,12 @@ describe("createTelegramOIDCProvider", () => {
       });
 
       await expect(verifyProviderIdToken(provider, token)).resolves.toBe(false);
-      expect(mockedBetterFetch).not.toHaveBeenCalled();
+      expect(mockJWKS).not.toHaveBeenCalled();
     });
 
     it("should reject a JWK whose algorithm does not match the token header", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
-        data: { keys: [{ ...jwk, alg: undefined }] },
+      mockJWKS.mockResolvedValueOnce({
+        data: { keys: [{ ...jwk, alg: "ES256" }] },
       } as any);
 
       const token = await createSignedJWT({ sub: "12345" });
@@ -761,7 +759,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should select the JWK matching both kid and algorithm", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: {
           keys: [
             { ...jwk, alg: "ES256" },
@@ -777,7 +775,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false when JWKS fetch fails", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: null,
       } as any);
 
@@ -789,7 +787,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false when kid is not found in JWKS", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: {
           keys: [{ ...jwk, kid: "different-kid" }],
         },
@@ -803,7 +801,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false for a token with wrong issuer", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: { keys: [jwk] },
       } as any);
 
@@ -822,7 +820,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false for a token with wrong audience", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: { keys: [jwk] },
       } as any);
 
@@ -841,7 +839,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false for an expired token", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: { keys: [jwk] },
       } as any);
 
@@ -860,7 +858,7 @@ describe("createTelegramOIDCProvider", () => {
     });
 
     it("should return false for a token signed with a different key", async () => {
-      mockedBetterFetch.mockResolvedValueOnce({
+      mockJWKS.mockResolvedValueOnce({
         data: { keys: [jwk] },
       } as any);
 
@@ -1553,10 +1551,11 @@ describe.skipIf(!distExists)("Module augmentation in built output", () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const distDir = path.resolve(process.cwd(), "dist");
-    const dtsContent = fs.readFileSync(
-      path.join(distDir, "index.d.ts"),
-      "utf-8"
-    );
+    const dtsContent = fs
+      .readdirSync(distDir)
+      .filter((name) => name.endsWith(".d.ts"))
+      .map((name) => fs.readFileSync(path.join(distDir, name), "utf-8"))
+      .join("\n");
     expect(dtsContent).toContain("BetterAuthPluginRegistry");
     expect(dtsContent).toContain("typeof telegram");
     expect(dtsContent).toContain('declare module "@better-auth/core"');
@@ -1566,10 +1565,11 @@ describe.skipIf(!distExists)("Module augmentation in built output", () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const distDir = path.resolve(process.cwd(), "dist");
-    const dctsContent = fs.readFileSync(
-      path.join(distDir, "index.d.cts"),
-      "utf-8"
-    );
+    const dctsContent = fs
+      .readdirSync(distDir)
+      .filter((name) => name.endsWith(".d.cts"))
+      .map((name) => fs.readFileSync(path.join(distDir, name), "utf-8"))
+      .join("\n");
     expect(dctsContent).toContain("BetterAuthPluginRegistry");
     expect(dctsContent).toContain("typeof telegram");
     expect(dctsContent).toContain('declare module "@better-auth/core"');
@@ -1579,10 +1579,11 @@ describe.skipIf(!distExists)("Module augmentation in built output", () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const distDir = path.resolve(process.cwd(), "dist");
-    const dtsContent = fs.readFileSync(
-      path.join(distDir, "index.d.ts"),
-      "utf-8"
-    );
+    const dtsContent = fs
+      .readdirSync(distDir)
+      .filter((name) => name.endsWith(".d.ts"))
+      .map((name) => fs.readFileSync(path.join(distDir, name), "utf-8"))
+      .join("\n");
 
     // Verify the augmentation references the exact module
     const moduleRegex = /declare module "@better-auth\/core"/;
@@ -1597,14 +1598,16 @@ describe.skipIf(!distExists)("Module augmentation in built output", () => {
     const path = await import("node:path");
     const distDir = path.resolve(process.cwd(), "dist");
 
-    const dtsContent = fs.readFileSync(
-      path.join(distDir, "index.d.ts"),
-      "utf-8"
-    );
-    const dctsContent = fs.readFileSync(
-      path.join(distDir, "index.d.cts"),
-      "utf-8"
-    );
+    const dtsContent = fs
+      .readdirSync(distDir)
+      .filter((name) => name.endsWith(".d.ts"))
+      .map((name) => fs.readFileSync(path.join(distDir, name), "utf-8"))
+      .join("\n");
+    const dctsContent = fs
+      .readdirSync(distDir)
+      .filter((name) => name.endsWith(".d.cts"))
+      .map((name) => fs.readFileSync(path.join(distDir, name), "utf-8"))
+      .join("\n");
 
     // Extract the augmentation blocks
     const augmentationPattern =

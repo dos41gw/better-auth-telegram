@@ -1,6 +1,5 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": ["ultracite/core"],
   "linter": {
     "rules": {
       "style": {
@@ -28,6 +27,21 @@
     }
   },
   "files": {
-    "includes": ["**", "!dist", "!coverage"]
+    "includes": [
+      "**",
+      "!dist",
+      "!coverage",
+      "!test/.next",
+      "!test/next-env.d.ts"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "javascript": {
+    "formatter": {
+      "trailingCommas": "es5"
+    }
   }
 }

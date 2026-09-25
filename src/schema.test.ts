@@ -60,10 +60,10 @@ describe("createTelegramSchema", () => {
     const schema = createTelegramSchema(makeConfig())!;
     const userFields = schema.user!.fields;
 
-    for (const field of Object.values(userFields)) {
+    for (const [name, field] of Object.entries(userFields)) {
       expect(field.type).toBe("string");
       expect(field.required).toBe(false);
-      expect(field.unique).toBe(false);
+      expect(field.unique).toBe(name === "telegramId");
       expect((field as any).input).toBe(false);
     }
   });
@@ -72,10 +72,10 @@ describe("createTelegramSchema", () => {
     const schema = createTelegramSchema(makeConfig())!;
     const accountFields = schema.account!.fields;
 
-    for (const field of Object.values(accountFields)) {
+    for (const [name, field] of Object.entries(accountFields)) {
       expect(field.type).toBe("string");
       expect(field.required).toBe(false);
-      expect(field.unique).toBe(false);
+      expect(field.unique).toBe(name === "telegramId");
     }
   });
 

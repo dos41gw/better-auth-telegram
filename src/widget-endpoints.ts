@@ -1,11 +1,16 @@
-import type { User } from "better-auth";
+import { runWithTransaction } from "@better-auth/core/context";
 import {
   APIError,
   createAuthEndpoint,
-  sessionMiddleware,
+  formCsrfMiddleware,
 } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
-import { telegramAccountIssuer } from "./account-issuer";
+import {
+  signInTelegram,
+  telegramAccountKey,
+  telegramSessionMiddleware,
+  validateTelegramUser,
+} from "./authentication";
 import { ERROR_CODES, PLUGIN_ID, SUCCESS_MESSAGES } from "./constants";
 import type { TelegramPluginConfig } from "./plugin-config";
 import type { TelegramAccountRecord, TelegramAuthData } from "./types";
@@ -20,6 +25,7 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
       "/telegram/signin",
       {
         method: "POST",
+        use: [formCsrfMiddleware],
       },
       async (ctx) => {
         if (!config.botToken) {
@@ -65,103 +71,13 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
           ? config.mapTelegramDataToUser(telegramData)
           : defaultUserData;
 
-        // Find existing account by telegramId
-        const existingAccount = await ctx.context.adapter.findOne({
-          model: "account",
-          where: [
-            {
-              field: "providerId",
-              value: PLUGIN_ID,
-            },
-            {
-              field: "accountId",
-              value: telegramData.id.toString(),
-            },
-          ],
-        });
-
-        let userId: string;
-
-        if (existingAccount) {
-          // User already has Telegram linked
-          userId = (existingAccount as TelegramAccountRecord).userId;
-        } else {
-          // Check if a user exists with this telegramId (e.g., created via Mini App)
-          const existingUser = await ctx.context.adapter.findOne({
-            model: "user",
-            where: [
-              {
-                field: "telegramId",
-                value: telegramData.id.toString(),
-              },
-            ],
-          });
-
-          if (existingUser) {
-            // User exists from another provider — link telegram account to them
-            userId = (existingUser as User).id;
-
-            await ctx.context.adapter.create({
-              model: "account",
-              data: {
-                ...telegramAccountIssuer(ctx.context.tables ?? {}),
-                userId,
-                providerId: PLUGIN_ID,
-                accountId: telegramData.id.toString(),
-                telegramId: telegramData.id.toString(),
-                telegramUsername: telegramData.username,
-              },
-            });
-          } else if (config.autoCreateUser) {
-            // Create new user
-            const newUser = await ctx.context.adapter.create({
-              model: "user",
-              data: {
-                ...userData,
-                telegramId: telegramData.id.toString(),
-                telegramUsername: telegramData.username,
-              },
-            });
-
-            userId = newUser.id;
-
-            // Create account
-            await ctx.context.adapter.create({
-              model: "account",
-              data: {
-                ...telegramAccountIssuer(ctx.context.tables ?? {}),
-                userId: newUser.id,
-                providerId: PLUGIN_ID,
-                accountId: telegramData.id.toString(),
-                telegramId: telegramData.id.toString(),
-                telegramUsername: telegramData.username,
-              },
-            });
-          } else {
-            throw APIError.from(
-              "NOT_FOUND",
-              ERROR_CODES.USER_CREATION_DISABLED
-            );
-          }
-        }
-
-        // Create session
-        const session = await ctx.context.internalAdapter.createSession(userId);
-
-        const user = await ctx.context.adapter.findOne({
-          model: "user",
-          where: [{ field: "id", value: userId }],
-        });
-
-        await setSessionCookie(ctx, {
-          session,
-          user: user as User,
-        });
-
-        return ctx.json({
-          user,
-          session,
-        });
+        return signInTelegram(
+          ctx,
+          telegramData,
+          userData,
+          config.autoCreateUser,
+          "telegram-widget"
+        );
       }
     ),
 
@@ -169,10 +85,13 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
       "/telegram/link",
       {
         method: "POST",
-        use: [sessionMiddleware],
+        use: [telegramSessionMiddleware],
       },
       async (ctx) => {
-        if (!config.allowUserToLink) {
+        if (
+          !config.allowUserToLink ||
+          ctx.context.options.account?.accountLinking?.enabled === false
+        ) {
           throw APIError.from("FORBIDDEN", ERROR_CODES.LINKING_DISABLED);
         }
 
@@ -243,28 +162,53 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
           );
         }
 
-        // Create account link
-        await ctx.context.adapter.create({
-          model: "account",
-          data: {
-            ...telegramAccountIssuer(ctx.context.tables ?? {}),
+        const accounts = await ctx.context.internalAdapter.findAccounts(
+          session.user.id
+        );
+        if (accounts.some((account) => account.providerId === PLUGIN_ID)) {
+          throw APIError.from(
+            "CONFLICT",
+            ERROR_CODES.TELEGRAM_ALREADY_LINKED_SELF
+          );
+        }
+        await validateTelegramUser(
+          ctx,
+          session.user,
+          "link-account",
+          "telegram-widget"
+        );
+        const user = await runWithTransaction(ctx.context.adapter, async () => {
+          const account = await ctx.context.internalAdapter.createAccount({
+            ...telegramAccountKey(telegramData.id),
             userId: session.user.id,
-            providerId: PLUGIN_ID,
-            accountId: telegramData.id.toString(),
-            telegramId: telegramData.id.toString(),
+            telegramId: String(telegramData.id),
             telegramUsername: telegramData.username,
-          },
+          });
+          if (
+            !account ||
+            account.userId !== session.user.id ||
+            account.accountId !== String(telegramData.id)
+          ) {
+            throw APIError.from(
+              "FORBIDDEN",
+              ERROR_CODES.INVALID_AUTHENTICATION
+            );
+          }
+          const updated = await ctx.context.internalAdapter.updateUser(
+            session.user.id,
+            {
+              telegramId: String(telegramData.id),
+              telegramUsername: telegramData.username,
+            }
+          );
+          if (!updated)
+            throw APIError.from(
+              "FORBIDDEN",
+              ERROR_CODES.INVALID_AUTHENTICATION
+            );
+          return updated;
         });
-
-        // Update user with Telegram data
-        await ctx.context.adapter.update({
-          model: "user",
-          where: [{ field: "id", value: session.user.id }],
-          update: {
-            telegramId: telegramData.id.toString(),
-            telegramUsername: telegramData.username,
-          },
-        });
+        await setSessionCookie(ctx, { session: session.session, user });
 
         return ctx.json({
           success: true,
@@ -277,7 +221,7 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
       "/telegram/unlink",
       {
         method: "POST",
-        use: [sessionMiddleware],
+        use: [telegramSessionMiddleware],
       },
       async (ctx) => {
         const session = ctx.context.session;
@@ -305,25 +249,50 @@ export function createWidgetEndpoints(config: TelegramPluginConfig) {
           throw APIError.from("NOT_FOUND", ERROR_CODES.NOT_LINKED);
         }
 
-        await ctx.context.adapter.delete({
-          model: "account",
-          where: [
+        const accounts = await ctx.context.internalAdapter.findAccounts(
+          session.user.id
+        );
+        if (
+          accounts.length <= 1 &&
+          !ctx.context.options.account?.accountLinking?.allowUnlinkingAll
+        ) {
+          throw new APIError("BAD_REQUEST", {
+            code: "FAILED_TO_UNLINK_LAST_ACCOUNT",
+            message: "Cannot unlink the last account",
+          });
+        }
+        const user = await runWithTransaction(ctx.context.adapter, async () => {
+          await ctx.context.internalAdapter.deleteAccount(
+            (account as TelegramAccountRecord).id
+          );
+          const remaining = await ctx.context.internalAdapter.findAccounts(
+            session.user.id
+          );
+          if (
+            remaining.some(
+              (item) => item.id === (account as TelegramAccountRecord).id
+            )
+          ) {
+            throw APIError.from(
+              "FORBIDDEN",
+              ERROR_CODES.INVALID_AUTHENTICATION
+            );
+          }
+          const updated = await ctx.context.internalAdapter.updateUser(
+            session.user.id,
             {
-              field: "id",
-              value: (account as TelegramAccountRecord).id,
-            },
-          ],
+              telegramId: null,
+              telegramUsername: null,
+            }
+          );
+          if (!updated)
+            throw APIError.from(
+              "FORBIDDEN",
+              ERROR_CODES.INVALID_AUTHENTICATION
+            );
+          return updated;
         });
-
-        // Clear Telegram data from user
-        await ctx.context.adapter.update({
-          model: "user",
-          where: [{ field: "id", value: session.user.id }],
-          update: {
-            telegramId: null,
-            telegramUsername: null,
-          },
-        });
+        await setSessionCookie(ctx, { session: session.session, user });
 
         return ctx.json({
           success: true,

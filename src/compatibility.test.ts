@@ -2,7 +2,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import { getAuthTables } from "@better-auth/core/db";
-import { betterAuth } from "better-auth";
+import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import {
@@ -80,7 +80,10 @@ function signToken(
     .setExpirationTime("1h")
     .sign(signingKey);
 }
-function setup(oidc: TelegramOIDCOptions = {}) {
+function setup(
+  oidc: TelegramOIDCOptions = {},
+  options: BetterAuthOptions = {}
+) {
   const db: Record<string, any[]> = {
     user: [],
     account: [],
@@ -92,6 +95,8 @@ function setup(oidc: TelegramOIDCOptions = {}) {
     secret: "integration-test-secret-at-least-32-characters",
     database: memoryAdapter(db),
     logger: { disabled: true },
+    advanced: { disableCSRFCheck: false, disableOriginCheck: false },
+    ...options,
     plugins: [
       telegram({
         botToken,
@@ -225,64 +230,60 @@ describe("Better Auth 1.7 HTTP integration", () => {
     expect(db.user![0].name).toBe("Mapped");
   });
 
-  it.each([
-    "signature",
-    "issuer",
-    "audience",
-    "expiry",
-    "missing-sub",
-    "jwks",
-  ])("rejects invalid %s before profile mapping or database writes", async (failure) => {
-    const mapper = vi.fn(() => ({ name: "Never mapped" }));
-    const { db, request } = setup({ mapOIDCProfileToUser: mapper });
-    if (failure === "signature") {
-      exchangedToken = await signToken(
-        {},
-        (await generateKeyPair("RS256")).privateKey
+  it.each(["signature", "issuer", "audience", "expiry", "missing-sub", "jwks"])(
+    "rejects invalid %s before profile mapping or database writes",
+    async (failure) => {
+      const mapper = vi.fn(() => ({ name: "Never mapped" }));
+      const { db, request } = setup({ mapOIDCProfileToUser: mapper });
+      if (failure === "signature") {
+        exchangedToken = await signToken(
+          {},
+          (await generateKeyPair("RS256")).privateKey
+        );
+      }
+      if (failure === "issuer") {
+        exchangedToken = await new SignJWT({ sub: "bad" })
+          .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
+          .setIssuer("https://wrong.example")
+          .setAudience(clientId)
+          .setIssuedAt()
+          .setExpirationTime("1h")
+          .sign(keyPair.privateKey);
+      }
+      if (failure === "audience") {
+        exchangedToken = await new SignJWT({ sub: "bad" })
+          .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
+          .setIssuer(TELEGRAM_OIDC_ISSUER)
+          .setAudience("wrong")
+          .setIssuedAt()
+          .setExpirationTime("1h")
+          .sign(keyPair.privateKey);
+      }
+      if (failure === "expiry") {
+        exchangedToken = await new SignJWT({ sub: "bad" })
+          .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
+          .setIssuer(TELEGRAM_OIDC_ISSUER)
+          .setAudience(clientId)
+          .setIssuedAt()
+          .setExpirationTime(1)
+          .sign(keyPair.privateKey);
+      }
+      if (failure === "missing-sub") {
+        exchangedToken = await signToken({ sub: undefined });
+      }
+      if (failure === "jwks") {
+        jwksStatus = 503;
+      }
+      const response = await callback(request);
+      expect(response.headers.get("location")).toContain(
+        "error=unable_to_get_user_info"
       );
+      expect(mapper).not.toHaveBeenCalled();
+      expect(db.user).toHaveLength(0);
+      expect(db.account).toHaveLength(0);
+      expect(db.session).toHaveLength(0);
     }
-    if (failure === "issuer") {
-      exchangedToken = await new SignJWT({ sub: "bad" })
-        .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
-        .setIssuer("https://wrong.example")
-        .setAudience(clientId)
-        .setIssuedAt()
-        .setExpirationTime("1h")
-        .sign(keyPair.privateKey);
-    }
-    if (failure === "audience") {
-      exchangedToken = await new SignJWT({ sub: "bad" })
-        .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
-        .setIssuer(TELEGRAM_OIDC_ISSUER)
-        .setAudience("wrong")
-        .setIssuedAt()
-        .setExpirationTime("1h")
-        .sign(keyPair.privateKey);
-    }
-    if (failure === "expiry") {
-      exchangedToken = await new SignJWT({ sub: "bad" })
-        .setProtectedHeader({ alg: "RS256", kid: "integration-key" })
-        .setIssuer(TELEGRAM_OIDC_ISSUER)
-        .setAudience(clientId)
-        .setIssuedAt()
-        .setExpirationTime(1)
-        .sign(keyPair.privateKey);
-    }
-    if (failure === "missing-sub") {
-      exchangedToken = await signToken({ sub: undefined });
-    }
-    if (failure === "jwks") {
-      jwksStatus = 503;
-    }
-    const response = await callback(request);
-    expect(response.headers.get("location")).toContain(
-      "error=unable_to_get_user_info"
-    );
-    expect(mapper).not.toHaveBeenCalled();
-    expect(db.user).toHaveLength(0);
-    expect(db.account).toHaveLength(0);
-    expect(db.session).toHaveLength(0);
-  });
+  );
 
   it("supports direct ID-token sign-in and rejects a mismatched nonce", async () => {
     const { db, request } = setup();
@@ -340,4 +341,132 @@ describe("Better Auth 1.7 HTTP integration", () => {
     expect(db.account).toHaveLength(1);
     expect(db.account![0].providerId).toBe("telegram-oidc");
   });
+});
+
+describe("Better Auth 1.7 native OIDC policies", () => {
+  it.each([
+    "disableSignUp",
+    "disableImplicitSignUp",
+    "disableIdTokenSignIn",
+  ] as const)("honors %s", async (policy) => {
+    const { request, db } = setup({ [policy]: true });
+    const response = await request("/sign-in/social", {
+      provider: "telegram-oidc",
+      idToken: { token: exchangedToken },
+    });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(db.user).toHaveLength(0);
+    expect(db.session).toHaveLength(0);
+  });
+  it("allows explicit signup when implicit signup is disabled", async () => {
+    const { request } = setup({ disableImplicitSignUp: true });
+    expect(
+      (
+        await request("/sign-in/social", {
+          provider: "telegram-oidc",
+          requestSignUp: true,
+          idToken: { token: exchangedToken },
+        })
+      ).status
+    ).toBe(200);
+  });
+  it("honors required email verification for Telegram's unverified placeholder", async () => {
+    const { request, db } = setup({ requireEmailVerification: true });
+    expect(
+      (
+        await request("/sign-in/social", {
+          provider: "telegram-oidc",
+          idToken: { token: exchangedToken },
+        })
+      ).status
+    ).toBeGreaterThanOrEqual(400);
+    expect(db.session).toHaveLength(0);
+  });
+  it("forwards login hints and optional parameters without allowing OAuth parameter replacement", async () => {
+    const { request } = setup({ requireNonce: true });
+    const response = await request("/sign-in/social", {
+      provider: "telegram-oidc",
+      loginHint: "hint",
+      additionalParams: { custom: "value" },
+    });
+    expect(response.status).toBe(200);
+    const url = new URL((await response.json()).url);
+    expect(url.searchParams.get("login_hint")).toBe("hint");
+    expect(url.searchParams.get("custom")).toBe("value");
+    expect(url.searchParams.get("nonce")).toBeTruthy();
+  });
+  it("pins a callback nonce to OAuth state", async () => {
+    const { request, db } = setup({ requireNonce: true });
+    const start = await request("/sign-in/social", {
+      provider: "telegram-oidc",
+      callbackURL: "/done",
+    });
+    const url = new URL((await start.json()).url);
+    exchangedToken = await signToken({ nonce: "wrong" });
+    const response = await request(
+      `/callback/telegram-oidc?code=test&state=${url.searchParams.get("state")}`,
+      undefined,
+      cookies(start)
+    );
+    expect(response.headers.get("location")).toContain("error=");
+    expect(db.session).toHaveLength(0);
+  });
+  it("completes a callback with its expected nonce", async () => {
+    const { request } = setup({ requireNonce: true });
+    const start = await request("/sign-in/social", {
+      provider: "telegram-oidc",
+      callbackURL: "/done",
+    });
+    const url = new URL((await start.json()).url);
+    exchangedToken = await signToken({ nonce: url.searchParams.get("nonce") });
+    const response = await request(
+      `/callback/telegram-oidc?code=test&state=${url.searchParams.get("state")}`,
+      undefined,
+      cookies(start)
+    );
+    expect(response.headers.get("location")).toBe("/done");
+  });
+  it("rejects invalid state before exchanging the code", async () => {
+    const { request, db } = setup();
+    const response = await request(
+      "/callback/telegram-oidc?code=test&state=forged"
+    );
+    expect(response.headers.get("location")).toContain("error=");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(db.user).toHaveLength(0);
+  });
+  it("rejects external callback redirects", async () => {
+    const { request } = setup();
+    expect(
+      (
+        await request("/sign-in/social", {
+          provider: "telegram-oidc",
+          callbackURL: "https://evil.example",
+        })
+      ).status
+    ).toBe(403);
+  });
+  it("reuses cached JWKS between validation and profile retrieval", async () => {
+    const { request } = setup();
+    for (let i = 0; i < 2; i++)
+      expect(
+        (
+          await request("/sign-in/social", {
+            provider: "telegram-oidc",
+            idToken: { token: exchangedToken },
+          })
+        ).status
+      ).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("rejects caller-supplied reserved OAuth parameters", async () => {
+  const { request, db } = setup();
+  const response = await request("/sign-in/social", {
+    provider: "telegram-oidc",
+    additionalParams: { state: "evil" },
+  });
+  expect(response.status).toBe(400);
+  expect(db.session).toHaveLength(0);
 });

@@ -76,6 +76,14 @@ export interface TelegramOIDCClaims {
  * Configuration options for Telegram OIDC authentication
  */
 export interface TelegramOIDCOptions {
+  /** Apply Better Auth's standard social-provider registration and verification policies. */
+  disableSignUp?: boolean;
+  disableImplicitSignUp?: boolean;
+  disableIdTokenSignIn?: boolean;
+  requireEmailVerification?: boolean;
+  /** Request and validate a server-generated OIDC nonce in the redirect flow. */
+  requireNonce?: boolean;
+
   /**
    * Client ID from @BotFather's Web Login settings.
    * If omitted, extracted from the main botToken (first part before colon).
@@ -198,6 +206,7 @@ export interface TelegramPluginOptions {
      * Validate initData from Mini Apps
      * @default true
      */
+    /** @deprecated Verification is mandatory. Setting false throws during initialization. */
     validateInitData?: boolean;
 
     /**

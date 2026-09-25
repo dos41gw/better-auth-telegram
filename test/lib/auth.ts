@@ -1,14 +1,13 @@
-import { PrismaClient } from "@prisma/client";
+import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
-import { prismaAdapter } from "better-auth/adapters/prisma";
 import { telegram } from "better-auth-telegram";
 
-const prisma = new PrismaClient();
+const database = new DatabaseSync(
+  process.env.DATABASE_PATH || "telegram-demo.db"
+);
 
 export const auth = betterAuth({
-  database: prismaAdapter(prisma, {
-    provider: "sqlite",
-  }),
+  database,
 
   secret: process.env.BETTER_AUTH_SECRET!,
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",

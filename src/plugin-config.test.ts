@@ -136,12 +136,12 @@ describe("createPluginConfig", () => {
       ...BASE,
       miniApp: {
         enabled: true,
-        validateInitData: false,
+        validateInitData: true,
         allowAutoSignin: false,
         mapMiniAppDataToUser: mapper,
       },
     });
-    expect(config.miniAppValidateInitData).toBe(false);
+    expect(config.miniAppValidateInitData).toBe(true);
     expect(config.miniAppAllowAutoSignin).toBe(false);
     expect(config.mapMiniAppDataToUser).toBe(mapper);
   });
@@ -199,3 +199,12 @@ describe("createPluginConfig", () => {
     spy.mockRestore();
   });
 });
+
+it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+  "rejects invalid maxAuthAge %s",
+  (maxAuthAge) => {
+    expect(() =>
+      createPluginConfig({ botToken: "token", botUsername: "bot", maxAuthAge })
+    ).toThrow("positive finite");
+  }
+);

@@ -1,10 +1,11 @@
-import type { User } from "better-auth";
-import { APIError, createAuthEndpoint } from "better-auth/api";
-import { setSessionCookie } from "better-auth/cookies";
-import { telegramAccountIssuer } from "./account-issuer";
-import { ERROR_CODES, PLUGIN_ID } from "./constants";
+import {
+  APIError,
+  createAuthEndpoint,
+  formCsrfMiddleware,
+} from "better-auth/api";
+import { signInTelegram } from "./authentication";
+import { ERROR_CODES } from "./constants";
 import type { TelegramPluginConfig } from "./plugin-config";
-import type { TelegramAccountRecord } from "./types";
 import {
   parseMiniAppInitData,
   validateMiniAppData,
@@ -20,10 +21,11 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
       "/telegram/miniapp/signin",
       {
         method: "POST",
+        use: [formCsrfMiddleware],
       },
       async (ctx) => {
         const body = await ctx.body;
-        const { initData } = body;
+        const initData = body?.initData;
 
         if (!initData || typeof initData !== "string") {
           throw APIError.from("BAD_REQUEST", ERROR_CODES.INIT_DATA_REQUIRED);
@@ -38,7 +40,6 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
 
         // Verify initData
         if (
-          config.miniAppValidateInitData &&
           !(await verifyMiniAppInitData(
             initData,
             config.botToken,
@@ -81,103 +82,13 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
           ? config.mapMiniAppDataToUser(miniAppUser)
           : defaultUserData;
 
-        // Find existing account by telegramId
-        const existingAccount = await ctx.context.adapter.findOne({
-          model: "account",
-          where: [
-            {
-              field: "providerId",
-              value: PLUGIN_ID,
-            },
-            {
-              field: "accountId",
-              value: miniAppUser.id.toString(),
-            },
-          ],
-        });
-
-        let userId: string;
-
-        if (existingAccount) {
-          // User already has Telegram linked
-          userId = (existingAccount as TelegramAccountRecord).userId;
-        } else {
-          // Check if a user exists with this telegramId (e.g., created via Login Widget)
-          const existingUser = await ctx.context.adapter.findOne({
-            model: "user",
-            where: [
-              {
-                field: "telegramId",
-                value: miniAppUser.id.toString(),
-              },
-            ],
-          });
-
-          if (existingUser) {
-            // User exists from another provider — link telegram account to them
-            userId = (existingUser as User).id;
-
-            await ctx.context.adapter.create({
-              model: "account",
-              data: {
-                ...telegramAccountIssuer(ctx.context.tables ?? {}),
-                userId,
-                providerId: PLUGIN_ID,
-                accountId: miniAppUser.id.toString(),
-                telegramId: miniAppUser.id.toString(),
-                telegramUsername: miniAppUser.username,
-              },
-            });
-          } else if (config.autoCreateUser && config.miniAppAllowAutoSignin) {
-            // Create new user
-            const newUser = await ctx.context.adapter.create({
-              model: "user",
-              data: {
-                ...userData,
-                telegramId: miniAppUser.id.toString(),
-                telegramUsername: miniAppUser.username,
-              },
-            });
-
-            userId = newUser.id;
-
-            // Create account
-            await ctx.context.adapter.create({
-              model: "account",
-              data: {
-                ...telegramAccountIssuer(ctx.context.tables ?? {}),
-                userId: newUser.id,
-                providerId: PLUGIN_ID,
-                accountId: miniAppUser.id.toString(),
-                telegramId: miniAppUser.id.toString(),
-                telegramUsername: miniAppUser.username,
-              },
-            });
-          } else {
-            throw APIError.from(
-              "NOT_FOUND",
-              ERROR_CODES.MINI_APP_AUTO_SIGNIN_DISABLED
-            );
-          }
-        }
-
-        // Create session
-        const session = await ctx.context.internalAdapter.createSession(userId);
-
-        const user = await ctx.context.adapter.findOne({
-          model: "user",
-          where: [{ field: "id", value: userId }],
-        });
-
-        await setSessionCookie(ctx, {
-          session,
-          user: user as User,
-        });
-
-        return ctx.json({
-          session,
-          user,
-        });
+        return signInTelegram(
+          ctx,
+          miniAppUser,
+          userData,
+          config.autoCreateUser && config.miniAppAllowAutoSignin,
+          "telegram-miniapp"
+        );
       }
     ),
 
@@ -188,7 +99,7 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
       },
       async (ctx) => {
         const body = await ctx.body;
-        const { initData } = body;
+        const initData = body?.initData;
 
         if (!initData || typeof initData !== "string") {
           throw APIError.from("BAD_REQUEST", ERROR_CODES.INIT_DATA_REQUIRED);
@@ -217,8 +128,8 @@ export function createMiniAppEndpoints(config: TelegramPluginConfig) {
         const data = parseMiniAppInitData(initData);
 
         return ctx.json({
-          valid: true,
-          data,
+          valid: validateMiniAppData(data),
+          data: validateMiniAppData(data) ? data : null,
         });
       }
     ),

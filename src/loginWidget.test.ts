@@ -21,6 +21,9 @@ vi.mock("better-auth/api", () => {
       (_path: string, _options: any, handler: any) => handler
     ),
     sessionMiddleware: {},
+    formCsrfMiddleware: {},
+    createAuthMiddleware: (handler: any) => handler,
+    getSessionFromCtx: vi.fn(),
     APIError: MockAPIError,
   };
 });

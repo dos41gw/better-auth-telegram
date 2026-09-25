@@ -3,8 +3,12 @@ import {
   createAuthorizationURL,
   validateAuthorizationCode,
 } from "@better-auth/core/oauth2";
-import { betterFetch } from "@better-fetch/fetch";
-import { decodeProtectedHeader, importJWK, type JWK, jwtVerify } from "jose";
+import {
+  createRemoteJWKSet,
+  customFetch,
+  decodeProtectedHeader,
+  jwtVerify,
+} from "jose";
 import {
   TELEGRAM_OIDC_AUTH_ENDPOINT,
   TELEGRAM_OIDC_ISSUER,
@@ -18,27 +22,6 @@ import type { TelegramOIDCClaims, TelegramOIDCOptions } from "./types";
  * Fetches a public key from Telegram's JWKS endpoint by key ID
  */
 const SUPPORTED_SIGNING_ALGORITHMS = new Set(["RS256", "ES256", "EdDSA"]);
-
-const getTelegramPublicKey = async (
-  kid: string,
-  algorithm: string,
-  timeout: number
-) => {
-  const { data } = await betterFetch<{
-    keys: JWK[];
-  }>(TELEGRAM_OIDC_JWKS_URI, { timeout, retry: 0 });
-
-  if (!data?.keys) {
-    throw new Error("Failed to fetch Telegram JWKS");
-  }
-
-  const jwk = data.keys.find((key) => key.kid === kid && key.alg === algorithm);
-  if (!jwk) {
-    throw new Error(`JWK with kid ${kid} and algorithm ${algorithm} not found`);
-  }
-
-  return await importJWK(jwk, algorithm);
-};
 
 /**
  * Builds the scopes array from OIDC options
@@ -104,9 +87,29 @@ export function createTelegramOIDCProvider(
     );
   }
 
+  // jose caches and coalesces key fetches, bounds their duration, and handles rotation.
+  const jwks = createRemoteJWKSet(new URL(TELEGRAM_OIDC_JWKS_URI), {
+    timeoutDuration: jwksFetchTimeoutMs,
+    cooldownDuration: 30_000,
+    cacheMaxAge: 600_000,
+    [customFetch]: (url, init) => fetch(url, { ...init, redirect: "error" }),
+  });
+
   const providerOptions = {
     clientId,
     clientSecret,
+    ...(options.disableSignUp !== undefined
+      ? { disableSignUp: options.disableSignUp }
+      : {}),
+    ...(options.disableImplicitSignUp !== undefined
+      ? { disableImplicitSignUp: options.disableImplicitSignUp }
+      : {}),
+    ...(options.disableIdTokenSignIn !== undefined
+      ? { disableIdTokenSignIn: options.disableIdTokenSignIn }
+      : {}),
+    ...(options.requireEmailVerification !== undefined
+      ? { requireEmailVerification: options.requireEmailVerification }
+      : {}),
   };
 
   const requireOIDCCredentials = () => {
@@ -138,12 +141,7 @@ export function createTelegramOIDCProvider(
         return null;
       }
 
-      const publicKey = await getTelegramPublicKey(
-        kid,
-        alg,
-        jwksFetchTimeoutMs
-      );
-      const { payload } = await jwtVerify(token, publicKey, {
+      const { payload } = await jwtVerify(token, jwks, {
         algorithms: [alg],
         issuer: TELEGRAM_OIDC_ISSUER,
         audience: clientId,
@@ -152,6 +150,8 @@ export function createTelegramOIDCProvider(
 
       if (
         typeof payload.sub !== "string" ||
+        typeof payload.iat !== "number" ||
+        payload.iat > Math.floor(Date.now() / 1000) + 30 ||
         !payload.sub.trim() ||
         (nonce !== undefined && payload.nonce !== nonce)
       ) {
@@ -169,8 +169,19 @@ export function createTelegramOIDCProvider(
     accountSubject: ({ profile }) => profile.sub,
     issuer: TELEGRAM_OIDC_ISSUER,
     name: "Telegram",
+    requiresIdTokenNonce: options.requireNonce ?? false,
+    disableSignUp: options.disableSignUp,
+    disableImplicitSignUp: options.disableImplicitSignUp,
 
-    createAuthorizationURL({ state, codeVerifier, scopes, redirectURI }) {
+    createAuthorizationURL({
+      state,
+      codeVerifier,
+      scopes,
+      redirectURI,
+      idTokenNonce,
+      loginHint,
+      additionalParams,
+    }) {
       requireOIDCCredentials();
 
       const _scopes = buildScopes(options);
@@ -186,6 +197,9 @@ export function createTelegramOIDCProvider(
         state,
         codeVerifier,
         redirectURI,
+        ...(idTokenNonce ? { nonce: idTokenNonce } : {}),
+        ...(loginHint ? { loginHint } : {}),
+        ...(additionalParams ? { additionalParams } : {}),
       });
     },
 
@@ -198,6 +212,7 @@ export function createTelegramOIDCProvider(
         redirectURI,
         options: providerOptions,
         tokenEndpoint: TELEGRAM_OIDC_TOKEN_ENDPOINT,
+        authentication: "basic",
       });
     },
 

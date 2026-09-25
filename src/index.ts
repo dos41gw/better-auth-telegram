@@ -11,7 +11,6 @@ import { createTelegramSchema } from "./schema";
 import type { TelegramPluginOptions } from "./types";
 import { createWidgetEndpoints, getWidgetRateLimits } from "./widget-endpoints";
 
-// biome-ignore lint/performance/noBarrelFile: Public API re-export
 export { createTelegramOIDCProvider } from "./oidc";
 export type { TelegramPluginConfig } from "./plugin-config";
 export type {
@@ -55,7 +54,10 @@ export const telegram = (options: TelegramPluginOptions) => {
           init: (ctx) => ({
             context: {
               socialProviders: [
-                createTelegramOIDCProvider(config.botToken, config.oidc!),
+                createTelegramOIDCProvider(config.botToken, {
+                  ...config.oidc,
+                  ...(!config.autoCreateUser ? { disableSignUp: true } : {}),
+                }),
                 ...ctx.socialProviders,
               ],
             },

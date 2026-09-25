@@ -155,13 +155,13 @@ describe("verifyTelegramAuth", () => {
       expect(result).toBe(false);
     });
 
-    it("should be case-sensitive for hash", async () => {
+    it("should accept equivalent uppercase hexadecimal signatures", async () => {
       const uppercaseHash = {
         ...validAuthData,
         hash: validAuthData.hash.toUpperCase(),
       };
       const result = await verifyTelegramAuth(uppercaseHash, BotToken);
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
   });
 

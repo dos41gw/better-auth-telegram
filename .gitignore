@@ -16,3 +16,10 @@ coverage/
 # Vitest
 .vitest/
 voice-tone.md
+# Local demo artifacts
+test/.next/
+test/next-env.d.ts
+*.tsbuildinfo
+*.db
+*.db-shm
+*.db-wal

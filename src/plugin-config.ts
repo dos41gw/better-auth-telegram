@@ -58,6 +58,13 @@ export function createPluginConfig(
     testMode = false,
   } = options;
 
+  if (!Number.isFinite(maxAuthAge) || maxAuthAge <= 0) {
+    throw new Error("maxAuthAge must be a positive finite number");
+  }
+  if (miniApp?.validateInitData === false) {
+    throw new Error("Mini App signature verification cannot be disabled");
+  }
+
   const widgetEnabled = loginWidget !== false;
   const miniAppEnabled = miniApp?.enabled ?? false;
   const oidcEnabled = oidc?.enabled ?? false;
