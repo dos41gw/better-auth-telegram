@@ -358,7 +358,7 @@ function createTelegramOIDCProvider(botToken, options = {}) {
 		timeoutDuration: jwksFetchTimeoutMs,
 		cooldownDuration: 3e4,
 		cacheMaxAge: 6e5,
-		[jose.customFetch]: (url, init) => fetch(url, {
+		[jose.customFetch]: (url, init) => (options.fetch ?? fetch)(url, {
 			...init,
 			redirect: "error"
 		})
@@ -422,16 +422,29 @@ function createTelegramOIDCProvider(botToken, options = {}) {
 				...additionalParams ? { additionalParams } : {}
 			});
 		},
-		validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
+		async validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
 			requireOIDCCredentials();
-			return (0, _better_auth_core_oauth2.validateAuthorizationCode)({
+			const request = {
 				code,
 				codeVerifier,
 				redirectURI,
 				options: providerOptions,
 				tokenEndpoint: TELEGRAM_OIDC_TOKEN_ENDPOINT,
 				authentication: "basic"
+			};
+			if (!options.fetch) return (0, _better_auth_core_oauth2.validateAuthorizationCode)(request);
+			const { body, headers } = await (0, _better_auth_core_oauth2.authorizationCodeRequest)(request);
+			const response = await options.fetch(TELEGRAM_OIDC_TOKEN_ENDPOINT, {
+				method: "POST",
+				body,
+				headers,
+				redirect: "error",
+				signal: AbortSignal.timeout(1e4)
 			});
+			if (!response.ok || response.redirected) throw new Error(`Telegram OIDC token exchange failed (HTTP ${response.status})`);
+			const data = await response.json();
+			if (!data || typeof data !== "object" || Array.isArray(data) || data.error) throw new Error("Telegram OIDC token exchange returned an invalid response");
+			return (0, _better_auth_core_oauth2.getOAuth2Tokens)(data);
 		},
 		idToken: { verify: async (token, nonce) => await verifyToken(token, nonce) !== null },
 		async getUserInfo(token) {

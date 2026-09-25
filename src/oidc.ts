@@ -1,6 +1,8 @@
 import type { OAuthProvider } from "@better-auth/core/oauth2";
 import {
+  authorizationCodeRequest,
   createAuthorizationURL,
+  getOAuth2Tokens,
   validateAuthorizationCode,
 } from "@better-auth/core/oauth2";
 import {
@@ -92,7 +94,8 @@ export function createTelegramOIDCProvider(
     timeoutDuration: jwksFetchTimeoutMs,
     cooldownDuration: 30_000,
     cacheMaxAge: 600_000,
-    [customFetch]: (url, init) => fetch(url, { ...init, redirect: "error" }),
+    [customFetch]: (url, init) =>
+      (options.fetch ?? fetch)(url, { ...init, redirect: "error" }),
   });
 
   const providerOptions = {
@@ -203,17 +206,46 @@ export function createTelegramOIDCProvider(
       });
     },
 
-    validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
+    async validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
       requireOIDCCredentials();
 
-      return validateAuthorizationCode({
+      const request = {
         code,
         codeVerifier,
         redirectURI,
         options: providerOptions,
         tokenEndpoint: TELEGRAM_OIDC_TOKEN_ENDPOINT,
-        authentication: "basic",
+        authentication: "basic" as const,
+      };
+      if (!options.fetch) return validateAuthorizationCode(request);
+
+      // Reuse Better Auth's request authentication and token normalization.
+      // Its default exchange helper does not accept a per-provider transport.
+      const { body, headers } = await authorizationCodeRequest(request);
+      const response = await options.fetch(TELEGRAM_OIDC_TOKEN_ENDPOINT, {
+        method: "POST",
+        body,
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
       });
+      if (!response.ok || response.redirected) {
+        throw new Error(
+          `Telegram OIDC token exchange failed (HTTP ${response.status})`
+        );
+      }
+      const data = await response.json();
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        data.error
+      ) {
+        throw new Error(
+          "Telegram OIDC token exchange returned an invalid response"
+        );
+      }
+      return getOAuth2Tokens(data);
     },
 
     idToken: {

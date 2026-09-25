@@ -76,6 +76,11 @@ export interface TelegramOIDCClaims {
  * Configuration options for Telegram OIDC authentication
  */
 export interface TelegramOIDCOptions {
+  /** Server-side transport for token exchange and JWKS (for example an outbound proxy).
+   * Must honor AbortSignal and redirect: "error", and preserve TLS verification.
+   * Custom token requests have a 10-second deadline; JWKS uses jwksFetchTimeoutMs.
+   */
+  fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
   /** Apply Better Auth's standard social-provider registration and verification policies. */
   disableSignUp?: boolean;
   disableImplicitSignUp?: boolean;

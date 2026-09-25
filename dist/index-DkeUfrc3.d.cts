@@ -73,6 +73,11 @@ interface TelegramOIDCClaims {
  * Configuration options for Telegram OIDC authentication
  */
 interface TelegramOIDCOptions {
+  /** Server-side transport for token exchange and JWKS (for example an outbound proxy).
+   * Must honor AbortSignal and redirect: "error", and preserve TLS verification.
+   * Custom token requests have a 10-second deadline; JWKS uses jwksFetchTimeoutMs.
+   */
+  fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
   /** Apply Better Auth's standard social-provider registration and verification policies. */
   disableSignUp?: boolean;
   disableImplicitSignUp?: boolean;
@@ -475,4 +480,4 @@ declare module "@better-auth/core" {
 }
 //#endregion
 export { TelegramAuthData as a, TelegramMiniAppUser as c, TelegramPluginOptions as d, TelegramAccountRecord as i, TelegramOIDCClaims as l, TelegramPluginConfig as n, TelegramMiniAppChat as o, createTelegramOIDCProvider as r, TelegramMiniAppData as s, telegram as t, TelegramOIDCOptions as u };
-//# sourceMappingURL=index-CidV5lQ5.d.cts.map
+//# sourceMappingURL=index-DkeUfrc3.d.cts.map

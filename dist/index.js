@@ -3,7 +3,7 @@ import { defineErrorCodes } from "@better-auth/core/utils/error-codes";
 import { getCurrentAdapter, runWithTransaction } from "@better-auth/core/context";
 import { setSessionCookie } from "better-auth/cookies";
 import { parseSessionOutput, parseUserOutput } from "better-auth/db";
-import { createAuthorizationURL, validateAuthorizationCode } from "@better-auth/core/oauth2";
+import { authorizationCodeRequest, createAuthorizationURL, getOAuth2Tokens, validateAuthorizationCode } from "@better-auth/core/oauth2";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 //#region src/config-endpoint.ts
 /**
@@ -357,7 +357,7 @@ function createTelegramOIDCProvider(botToken, options = {}) {
 		timeoutDuration: jwksFetchTimeoutMs,
 		cooldownDuration: 3e4,
 		cacheMaxAge: 6e5,
-		[customFetch]: (url, init) => fetch(url, {
+		[customFetch]: (url, init) => (options.fetch ?? fetch)(url, {
 			...init,
 			redirect: "error"
 		})
@@ -421,16 +421,29 @@ function createTelegramOIDCProvider(botToken, options = {}) {
 				...additionalParams ? { additionalParams } : {}
 			});
 		},
-		validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
+		async validateAuthorizationCode({ code, codeVerifier, redirectURI }) {
 			requireOIDCCredentials();
-			return validateAuthorizationCode({
+			const request = {
 				code,
 				codeVerifier,
 				redirectURI,
 				options: providerOptions,
 				tokenEndpoint: TELEGRAM_OIDC_TOKEN_ENDPOINT,
 				authentication: "basic"
+			};
+			if (!options.fetch) return validateAuthorizationCode(request);
+			const { body, headers } = await authorizationCodeRequest(request);
+			const response = await options.fetch(TELEGRAM_OIDC_TOKEN_ENDPOINT, {
+				method: "POST",
+				body,
+				headers,
+				redirect: "error",
+				signal: AbortSignal.timeout(1e4)
 			});
+			if (!response.ok || response.redirected) throw new Error(`Telegram OIDC token exchange failed (HTTP ${response.status})`);
+			const data = await response.json();
+			if (!data || typeof data !== "object" || Array.isArray(data) || data.error) throw new Error("Telegram OIDC token exchange returned an invalid response");
+			return getOAuth2Tokens(data);
 		},
 		idToken: { verify: async (token, nonce) => await verifyToken(token, nonce) !== null },
 		async getUserInfo(token) {

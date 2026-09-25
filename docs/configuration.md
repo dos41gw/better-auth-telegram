@@ -44,6 +44,7 @@ telegram({
 | `requestPhone` | `false` | Adds `phone`; makes consented claims available, does not persist them |
 | `requestBotAccess` | `false` | Adds `telegram:bot_access` |
 | `mapOIDCProfileToUser` | name/image mapping | Maps a verified copy of claims; cannot change account identity |
+| `fetch` | Global `fetch` | Server-only transport for token exchange and JWKS; use for an outbound proxy. Honor AbortSignal, reject redirects, and retain TLS verification. Token exchange has a 10-second deadline. |
 | `jwksFetchTimeoutMs` | `10000` | Positive finite JWKS network timeout in milliseconds |
 | `disableSignUp` | core default (`false`) | Rejects new OIDC users; existing users may sign in |
 | `disableImplicitSignUp` | core default (`false`) | New users must explicitly set client `requestSignUp:true` |

@@ -2,7 +2,10 @@
 
 Entries below 3.0.0 describe upstream releases at their original dates; their dependency ranges, setup instructions and security claims are historical, not current guidance. Use the current [security policy](SECURITY.md) and [installation guide](docs/installation.md).
 
-## Unreleased
+## 4.0.1 (fork) — 2026-09-25
+
+- Add `oidc.fetch` for per-provider outbound proxy transports, used by both token exchange and JWKS verification. Preserve Better Auth request authentication/token normalization, reject token redirects and errors, and bound custom token exchange to 10 seconds.
+- Test custom transport routing, signed token verification, nonce rejection, HTTP errors, and failure without direct-connection fallback.
 
 - Refresh the fork security policy and all documentation against 4.0.0 and Better Auth 1.7.6. Clarify replay windows, conditional core rate limiting, cookies/CSRF ownership, protected OIDC fields, testMode limits, and actual error/response shapes.
 - Enable GitHub private vulnerability reporting for this fork; remove upstream contact/SLA claims and stale package/tooling references.
