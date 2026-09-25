@@ -1,6 +1,6 @@
 # Telegram Mini Apps
 
-Your web app, living inside Telegram. No login popups, no OAuth dances, no "please verify your email." The user opened your Mini App — they're already Telegram. Act accordingly.
+Mini Apps receive signed launch data from Telegram. The server must verify it before establishing an application session; opening the page or reading `initDataUnsafe` is not authentication.
 
 Requires `better-auth@>=1.7.0 <1.8.0`.
 
@@ -16,7 +16,7 @@ Before you commit to a path, know what you're choosing:
 | **Start params** | Nope | Yes |
 | **Setup effort** | Drop a widget | Register a Mini App with BotFather |
 
-If your app lives on the open web, use the Login Widget. If your app lives inside Telegram, you're in the right doc.
+For new browser integrations, consider native OIDC; the Login Widget is the legacy option. If your app lives inside Telegram, you're in the right doc.
 
 ## Setup
 
@@ -69,14 +69,14 @@ telegram({
   // Auto-create users on first sign-in (default: true)
   autoCreateUser: true,
 
-  // Max age of auth_date in seconds, prevents replay attacks (default: 86400 = 24h)
+  // Max age of auth_date in seconds, limits the replay window (default: 86400 = 24h)
   maxAuthAge: 86400,
 
   miniApp: {
     enabled: true,
 
     // Validate initData cryptographically (default: true)
-    // Turn this off and you deserve what happens next
+    // Verification is mandatory; false throws during configuration
     validateInitData: true,
 
     // Allow auto-signin to create new users (default: true)
@@ -138,34 +138,29 @@ const initData = window.Telegram.WebApp.initData;
 // Optional: validate without signing in
 const validation = await authClient.validateMiniApp(initData);
 if (!validation.data?.valid) {
-  // something's off
+  throw new Error("Invalid Telegram launch data");
 }
 
 // Sign in
 const result = await authClient.signInWithMiniApp(initData);
 ```
 
-### React Example
+### Error handling
 
-```tsx
-import { useEffect, useState } from "react";
-import { authClient } from "./auth-client";
-
-function MiniApp() {
-  const [user, setUser] = useState(null);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    authClient.autoSignInFromMiniApp()
-      .then((result) => setUser(result.data?.user))
-      .catch((err) => setError(err.message));
-  }, []);
-
-  if (error) return <div>Auth failed: {error}</div>;
-  if (!user) return <div>Loading...</div>;
-  return <div>Welcome, {user.name}</div>;
+```ts
+try {
+  const result = await authClient.autoSignInFromMiniApp();
+  if (result.error) {
+    // Display the error message without logging initData or session tokens.
+  } else {
+    // Fetch your application data using the newly established session.
+  }
+} catch {
+  // Browser/SDK launch data is unavailable, or the transport failed.
 }
 ```
+
+Validation-only calls do not grant application access and may accept a signed payload with no `user`. Sign-in requires a user. Signatures cannot be disabled; expired data should be refreshed rather than accepted indefinitely. See [security](security.md#hmac-verification-and-replay-limits).
 
 ## API Reference
 
@@ -184,7 +179,7 @@ Signs in (or creates) a user from Mini App initData. Sets session cookie.
 **Errors:**
 - `400` — Missing or malformed initData, no user in payload
 - `401` — Cryptographic verification failed
-- `404` — User not found and auto-creation disabled (`autoCreateUser` or `allowAutoSignin` is `false`)
+- `403` — User not found and auto-creation disabled (`autoCreateUser` or `allowAutoSignin` is `false`)
 
 #### `POST /api/auth/telegram/miniapp/validate`
 
@@ -246,9 +241,9 @@ Unlike the Login Widget (which uses `SHA256(botToken)` as the HMAC key), Mini Ap
 1. `secret = HMAC-SHA256("WebAppData", botToken)`
 2. `signature = HMAC-SHA256(secret, dataCheckString)`
 
-Where `dataCheckString` is all initData params (minus `hash`), sorted alphabetically, joined with `\n`. Timestamp is checked against `maxAuthAge` (default 24h) to prevent replay attacks.
+Where `dataCheckString` is all initData params (minus `hash`), sorted alphabetically, joined with `\n`. Timestamp is checked against `maxAuthAge` (default 24h) to limit replay exposure; valid data can be reused within that window.
 
-All of this runs on Web Crypto API (`crypto.subtle`) — no Node-specific deps, works everywhere.
+All of this runs on Web Crypto API (`crypto.subtle`) — no Node crypto dependency in the verifier. Runtime/adapter compatibility still needs validation.
 
 ## Troubleshooting
 
@@ -260,11 +255,11 @@ All of this runs on Web Crypto API (`crypto.subtle`) — no Node-specific deps, 
 
 **"Invalid Mini App initData" (401)** — Cryptographic verification failed. Check your `TELEGRAM_BOT_TOKEN` is correct and matches the bot that owns the Mini App. Also check if `auth_date` is within `maxAuthAge`.
 
-**"User not found and auto-signin is disabled" (404)** — Either `autoCreateUser` or `miniApp.allowAutoSignin` is `false`, and this Telegram user doesn't have an existing account. Both must be `true` to create new users via Mini App.
+**"User not found and auto-create is disabled" (403)** — Either `autoCreateUser` or `miniApp.allowAutoSignin` is `false`, and this Telegram user doesn't have an existing account. Both must be `true` to create new users via Mini App.
 
 ## Resources
 
 - [Telegram Mini Apps Docs](https://core.telegram.org/bots/webapps)
 - [Telegram WebApp API](https://core.telegram.org/bots/webapps#initializing-mini-apps)
 - [Better Auth](https://better-auth.com)
-- [GitHub](https://github.com/vcode-sh/better-auth-telegram)
+- [GitHub](https://github.com/dos41gw/better-auth-telegram)

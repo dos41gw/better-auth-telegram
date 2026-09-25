@@ -1,83 +1,44 @@
 # better-auth-telegram
 
-Telegram authentication plugin for [Better Auth](https://www.better-auth.com/). Login Widget + Mini App + OIDC auth flows, published as `better-auth-telegram` on npm.
+The dos41gw fork targets Better Auth 1.7.x and is installed from GitHub. The upstream npm package does not include this fork's changes.
 
 ## Architecture
 
-Two entry points, two export paths:
+- `src/index.ts` → `better-auth-telegram`: server plugin, conditional schema/endpoints, OIDC injection.
+- `src/client.ts` → `better-auth-telegram/client`: Widget DOM helpers, Mini App/OIDC actions, session-store notifications.
+- `src/authentication.ts`: shared HMAC provisioning, validation, authoritative/fresh sessions.
+- `src/widget-endpoints.ts`, `src/miniapp-endpoints.ts`, `src/config-endpoint.ts`: HTTP endpoints.
+- `src/verify.ts`: Widget and Mini App Web Crypto HMAC verification, timestamps and structural validation.
+- `src/oidc.ts`: native social provider; verified stable `sub`, jose remote JWKS caching and claim checks.
+- `src/plugin-config.ts`, `src/schema.ts`, `src/constants.ts`, `src/types.ts`: config, schema, errors and public types.
 
-- **`src/index.ts`** -> `better-auth-telegram` -- Server plugin (`BetterAuthPlugin`)
-- **`src/client.ts`** -> `better-auth-telegram/client` -- Browser client plugin (widget management, Mini App auto-signin)
+Widget registers `/telegram/signin`, `/telegram/link`, `/telegram/unlink`; Mini App optionally registers `/telegram/miniapp/signin` and `/telegram/miniapp/validate`. `/telegram/config` is always present. Better Auth prefixes the auth base path. OIDC uses native `/sign-in/social` and `/callback/telegram-oidc` routes.
 
-Supporting modules:
+Telegram fields are declared only if Widget or Mini App is enabled. OIDC-only configuration requires both to be disabled. User/account Telegram IDs are nullable and unique, with `input:false`; deployed databases require an explicit migration.
 
-- **`src/verify.ts`** -- HMAC-SHA256 verification via Web Crypto API. Two paths: Login Widget (`SHA256(botToken)`) and Mini App (`HMAC-SHA256("WebAppData", botToken)`)
-- **`src/oidc.ts`** -- Telegram OIDC provider factory. Creates an `OAuthProvider` for Better Auth's social login system using OAuth 2.0 Authorization Code flow with PKCE via `oauth.telegram.org`. Allowlisted JWT verification via JWKS.
-- **`src/types.ts`** -- All TypeScript interfaces (`TelegramPluginOptions`, `TelegramAuthData`, Mini App types, `TelegramOIDCOptions`, `TelegramOIDCClaims`)
-- **`src/constants.ts`** -- Error codes, success messages, `PLUGIN_ID`, `DEFAULT_MAX_AUTH_AGE`, OIDC endpoints/issuer constants
+## Tooling
 
-### Server Endpoints
+Use Bun and the checked-in lockfiles. Node 24.11+ builds the package; runtime Node requirement is 24+. Biome handles lint/format directly. tsdown emits ESM/CJS, declarations and maps. TypeScript 7, Vitest 5 and happy-dom are development dependencies. jose is the sole direct runtime dependency; better-auth and @better-auth/core are peers.
 
-| Method | Path | Auth | Purpose |
-|--------|------|------|---------|
-| POST | `/telegram/signin` | None | Authenticate with Login Widget data |
-| POST | `/telegram/link` | Session | Link Telegram to current user |
-| POST | `/telegram/unlink` | Session | Unlink Telegram from current user |
-| GET | `/telegram/config` | None | Returns bot username for widget init |
-| POST | `/telegram/miniapp/signin` | None | Sign in from Mini App (optional) |
-| POST | `/telegram/miniapp/validate` | None | Validate Mini App initData (optional) |
-
-OIDC (when `oidc.enabled`) uses Better Auth's built-in social login routes (`POST /sign-in/social` with `provider: "telegram-oidc"`, `GET /callback/telegram-oidc`). The plugin injects a `telegram-oidc` social provider via the `init` hook.
-
-Schema conditionally extends `user` table with `telegramId`, `telegramUsername`, and `telegramPhoneNumber` fields, and `account` table with `telegramId` and `telegramUsername` fields — only when Login Widget or Mini App flows are enabled (default). OIDC-only setups (`loginWidget: false`) skip these fields.
-
-## Code Style
-
-- **Biome** via ultracite (`biome.jsonc` extends `ultracite/core`)
-- **lint-staged** runs `ultracite fix` on pre-commit
-- Relaxed rules: `noNonNullAssertion`, `noExplicitAny`, `useNamingConvention`, `noMagicNumbers` all off
-- ES modules, `verbatimModuleSyntax`, strict null checks, `noUncheckedIndexedAccess`
-
-## Testing
-
-- **Vitest** with `happy-dom` environment
-- Tests co-located in `src/` (`*.test.ts`)
-- Coverage: v8 provider, thresholds -- 90% lines/statements/branches, 80% functions
-- `vitest.setup.ts` suppresses happy-dom DOMException warnings for script loading
-
-## Commands
-
-```bash
-npm run build          # tsup (ESM + CJS + .d.ts)
-npm run dev            # tsup --watch
-npm run type-check     # tsc --noEmit
-npm run test           # vitest run
-npm run test:watch     # vitest (watch mode)
-npm run test:coverage  # vitest run --coverage
-npm run lint           # ultracite check
-npm run lint:fix       # ultracite fix
+```sh
+bun run type-check
+bun run test
+bun --bun run test
+bun run test:coverage
+bun run lint
+bun run lint:fix
+bun run build
 ```
 
-Single test file: `npx vitest run src/verify.test.ts`
+Tests live beside source. HTTP security tests use real Better Auth and in-memory SQLite; browser tests use happy-dom. Coverage thresholds remain 90% lines/statements/branches and 80% functions. `dist/` is committed for Git consumers; rebuild it after source/declaration changes. No lint-staged, Ultracite or Vitest UI setup is installed.
 
-## Dependencies
+## Review constraints
 
-**Runtime (peer):** `better-auth` (`>=1.7.0 <1.8.0`)
-
-**Build external:** `better-auth`, `zod` (tsup external)
-
-**Dev:** Biome, ultracite, tsup, TypeScript 5.9, Vitest 4, happy-dom
-
-**Node:** >= 24.0.0
-
-## Review Guidelines
-
-- Verification logic in `verify.ts` is security-critical -- changes to HMAC computation or timestamp checks need extra scrutiny
-- `botToken` must never leak to client-side code. Server plugin only.
-- All endpoints use `createAuthEndpoint()` from `better-auth/api`. Follow that pattern.
-- Session-protected endpoints use `sessionMiddleware`. Don't forget it for authenticated routes.
-- Type guards (`validateTelegramAuthData`, `validateMiniAppData`) run before processing. Don't skip validation.
-- Mini App endpoints are conditionally registered (`miniApp.enabled`). Test both enabled and disabled paths.
-- OIDC provider is conditionally injected via `init` hook (`oidc.enabled`). JWT verification in `oidc.ts` uses `jose` library -- changes to JWKS fetching or token validation need scrutiny.
-- HTTP status codes: 400 (validation), 401 (auth), 403 (disabled), 404 (not found), 409 (conflict)
-- Coverage thresholds are enforced in CI. New code needs tests.
+- Use Better Auth internal adapter APIs for provisioning hooks and transactions; use its cookies and output parsers.
+- Sensitive custom mutations use `telegramSessionMiddleware`, which ignores cookie cache and respects freshness settings. Use the existing Better Auth CSRF middleware; do not introduce a parallel auth stack.
+- HMAC verification cannot be disabled. Timestamp expiry limits replay exposure but is not one-time replay protection.
+- Rate-limit enforcement belongs to Better Auth and depends on app settings and storage.
+- Never infer ownership from email or denormalized metadata; never remap OIDC account identity.
+- Keep secrets and signed payloads out of responses/logs. `APIError` is structured error handling, not automatic redaction.
+- Consult [security boundaries](docs/security.md) before claiming MFA, captcha, arbitrary adapter/runtime, or anonymous-upgrade compatibility.
+- Demo migrations are explicit CLI actions. Do not run them against production or during app import/build.

@@ -18,6 +18,8 @@ bun run dev
 
 For Widget login, configure the bot domain through BotFather. For OIDC, register the exact origin and `/api/auth/callback/telegram-oidc` URL in BotFather's Web Login settings and configure its client ID/secret. For a Telegram Mini App, register a public HTTPS URL ending in `/miniapp`. An HTTPS tunnel can expose the demo; set `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS` and `NEXT_PUBLIC_APP_URL` accordingly.
 
+Better Auth already includes credentials in browser-client requests. If sessions fail, inspect cookies/origins using the [troubleshooting guide](../docs/troubleshooting.md#cookies-and-sessions). Never log real Telegram payloads while testing.
+
 Pages: `/widget`, `/miniapp`, `/oidc`, `/dashboard`. Verify login, session restoration, sign-out and account linking manually with your own Telegram account.
 
 Validation: `bun run type-check` in this directory, and `bun run lint` / `bun run test:coverage` at the repository root. The demo uses root Biome instead of a separate ESLint stack. See the [security and migration guide](../docs/security-compatibility-audit.md) for MFA, captcha, replay and schema requirements.

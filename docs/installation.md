@@ -1,156 +1,83 @@
 # Installation
 
-You want Telegram auth in your app. Bold choice. Let's get it done without a twelve-step programme.
+## Requirements and package source
 
-## Prerequisites
+Use Node 24+ or the tested Bun runtime, with both `better-auth` and `@better-auth/core` on matching supported `>=1.7.0 <1.8.0` versions. The development build toolchain needs Node 24.11+. Web Crypto alone does not establish compatibility with every edge runtime or database adapter.
 
-- Node.js >= 24
-- A [Better Auth](https://www.better-auth.com/) project (`>=1.7.0 <1.8.0`)
-- A Telegram account (shocking, I know)
-
-## Install
-
-```bash
-npm install github:dos41gw/better-auth-telegram#codex/better-auth-1.7
+```sh
+bun add better-auth@1.7.6 @better-auth/core@1.7.6
+bun add github:dos41gw/better-auth-telegram#main
 ```
 
-Works with pnpm, yarn, bun -- whatever you've pledged allegiance to this month.
+Use a commit SHA instead of `main` to pin the fork. The npm package named `better-auth-telegram` belongs to upstream; its release does not include this fork. Compiled `dist/` files are committed for Git installs.
 
-## Create a Telegram Bot
+## Configure Telegram
 
-1. Message [@BotFather](https://t.me/botfather) on Telegram
-2. Send `/newbot`, follow the prompts
-3. Save the **bot token** -- you'll need it
-4. Note the **bot username** (without the `@`)
-5. Send `/setdomain` to BotFather, pick your bot, enter your domain
+For the legacy Widget, create a bot in [BotFather](https://t.me/botfather), save its token/username and register the website domain with `/setdomain`. For a Mini App, register its HTTPS launch URL.
 
-Telegram demands HTTPS and a public domain. `localhost` won't cut it -- see [Local Development](#local-development-ngrok) below.
+For OIDC, open the bot's Login Widget/Web Login settings in BotFather, register the website origin and exact callback URL (normally `https://example.com/api/auth/callback/telegram-oidc`), and copy the Web Login Client ID and Client Secret. The Client Secret is distinct from the bot token. Follow [Telegram's current instructions](https://core.telegram.org/bots/telegram-login); no undocumented delete/re-add procedure is required by this plugin.
 
-## Environment Variables
+Use a registered HTTPS development URL or tunnel to test browser and Mini App flows. Keep environment URLs and allowed Telegram URLs aligned.
 
-```env
-TELEGRAM_BOT_TOKEN="your_bot_token_from_botfather"
-TELEGRAM_BOT_USERNAME="your_bot_username"
-```
+## Server and client
 
-## Server Plugin
+Add the plugin to an existing Better Auth setup with its database, secret and framework handler configured:
 
-```typescript
+```ts
 import { betterAuth } from "better-auth";
 import { telegram } from "better-auth-telegram";
 
 export const auth = betterAuth({
-  // ...your database, secret, etc.
-  plugins: [
-    telegram({
-      botToken: process.env.TELEGRAM_BOT_TOKEN!,
-      botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-    }),
-  ],
+  // Retain your database, secret, baseURL and framework configuration.
+  plugins: [telegram({
+    botToken: process.env.TELEGRAM_BOT_TOKEN!,
+    botUsername: process.env.TELEGRAM_BOT_USERNAME!,
+  })],
 });
 ```
 
-That's the minimum. The defaults are sensible: `autoCreateUser: true`, `allowUserToLink: true`, `maxAuthAge: 86400` (24 hours).
-
-The default user mapping uses `first_name` + `last_name` for the `name` field (not `username`). Override it if you want:
-
-```typescript
-telegram({
-  botToken: process.env.TELEGRAM_BOT_TOKEN!,
-  botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-  mapTelegramDataToUser: (data) => ({
-    name: data.username || data.first_name,
-    image: data.photo_url,
-  }),
-}),
-```
-
-## Client Plugin
-
-```typescript
+```ts
 import { createAuthClient } from "better-auth/client";
 import { telegramClient } from "better-auth-telegram/client";
 
-export const authClient = createAuthClient({
-  plugins: [telegramClient()],
-});
+export const authClient = createAuthClient({ plugins: [telegramClient()] });
 ```
 
-No secret handshakes required. The client fetches bot config from your server automatically.
+Better Auth's browser client already defaults to including credentials. If using plain fetch, a custom transport or multiple origins, verify cookie/CORS behavior; see [troubleshooting](troubleshooting.md#cookies-and-sessions). For React hooks, import `createAuthClient` from `better-auth/react`.
 
-## Database Schema
+## Database schema
 
-When Login Widget or Mini App support is enabled, the plugin adds fields to **both** the `user` and `account` tables. OIDC-only setups with `loginWidget: false` do not declare these fields; add any OIDC profile fields you want to persist to your own user schema.
+When Widget or Mini App is enabled, these nullable string fields are declared:
 
-**User table:**
+| Table | Field | Unique | Client input |
+| --- | --- | --- | --- |
+| user | telegramId | Yes | No |
+| user | telegramUsername | No | No |
+| user | telegramPhoneNumber | No | No |
+| account | telegramId | Yes | No |
+| account | telegramUsername | No | No |
 
-| Field                 | Type     | Nullable | Notes |
-| --------------------- | -------- | -------- | ----- |
-| `telegramId`          | `string` | Yes      | |
-| `telegramUsername`    | `string` | Yes      | |
-| `telegramPhoneNumber` | `string` | Yes      | Available for custom OIDC profile mapping when the `phone` scope is requested |
-
-**Account table:**
-
-| Field              | Type     | Nullable |
-| ------------------ | -------- | -------- |
-| `telegramId`       | `string` | Yes      |
-| `telegramUsername`  | `string` | Yes      |
-
-If you use Better Auth's CLI to generate migrations, it handles this for you. Otherwise, add those columns to your database however your ORM of choice demands.
-
-Prisma example:
+Prisma additions, alongside your complete Better Auth models:
 
 ```prisma
 model User {
-  // ... existing fields
-  telegramId          String?
-  telegramUsername     String?
-  telegramPhoneNumber  String?  // map claims.phone_number here if requested
+  // Existing Better Auth fields and relations remain here.
+  telegramId          String? @unique
+  telegramUsername    String?
+  telegramPhoneNumber String?
 }
 
 model Account {
-  // ... existing fields
-  telegramId       String?
-  telegramUsername  String?
+  // Existing Better Auth fields and relations remain here.
+  telegramId       String? @unique
+  telegramUsername String?
 }
 ```
 
-Then run your migration and move on with your life.
+Generate and review migrations with the tooling appropriate for your adapter; these fragments are not complete schemas. Apply changes explicitly. For an existing installation, resolve duplicates and backfill account Telegram IDs before adding constraints. Follow the [4.0 migration guide](security-compatibility-audit.md#migration-from-3x), including the core `issuer` differences between early 1.7 and 1.7.6.
 
-## Local Development (ngrok)
+OIDC-only setups (`loginWidget:false`, Mini App disabled) omit these extra columns but still need Better Auth's core schema. Requesting the phone scope does not automatically persist a phone number. Plugin-owned `input:false` fields are not populated by ordinary core OIDC profile mapping; see [configuration](configuration.md#profile-mapping).
 
-Telegram requires HTTPS. Your `localhost:3000` is not HTTPS. ngrok fixes this.
+## Verify
 
-```bash
-ngrok http 3000
-```
-
-Take the HTTPS URL ngrok gives you (e.g. `https://abc123.ngrok-free.app`) and:
-
-1. Set it as `BETTER_AUTH_URL` in your env
-2. Tell BotFather via `/setdomain` (domain only, no `https://`)
-3. Restart your dev server
-
-Free ngrok gives you a new URL every time. Pay for a static domain or just accept your chaotic lifestyle.
-
-## Verify It Works
-
-1. Visit your app at the ngrok URL
-2. Render the Telegram widget (see [Usage](./usage.md))
-3. Click it, authenticate, marvel at the session cookie
-
-## Troubleshooting
-
-**Widget won't appear?** Check: container element exists, bot username is correct (no `@`), domain is set in BotFather, browser console for errors.
-
-**Auth failing?** Check: bot token is valid, domain matches BotFather config, database has the new columns.
-
-**ngrok URL changed?** It does that. Update env, update BotFather, restart. Or deploy to a real host.
-
-## Next Steps
-
-- [Usage Examples](./usage.md) -- actually rendering the widget
-- [API Reference](./api-reference.md) -- all the endpoints
-- [Configuration](./configuration.md) -- every option explained
-- [Security](./security.md) -- because you should care
+Render a Widget only after its container mounts, or initiate native OIDC from a button. Check sign-in, `/get-session`, sign-out and account-linking policies using the same browser origin. Never log signed payloads or session tokens while troubleshooting. The [demo](../test/README.md) provides an explicit local SQLite setup.

@@ -1,29 +1,21 @@
-## What fresh chaos is this?
+## Change
 
-<!-- Describe what you did and why. Spare me the novel. -->
+<!-- Describe the problem and resulting behavior. Link relevant issues. -->
 
-## Nature of the beast
+## Validation
 
-- [ ] Bug fix (something was broken and you, heroically, fixed it)
-- [ ] New feature (you added something nobody asked for but everyone needed)
-- [ ] Breaking change (you chose violence)
-- [ ] Documentation update (the rarest contribution in open source)
-- [ ] Refactoring (you moved things around and called it progress)
+<!-- List checks actually run and any limitations. -->
 
-## The bare minimum
+- [ ] Relevant tests pass (`bun run test`; CI covers Node/Bun and Better Auth 1.7.0/1.7.6)
+- [ ] Types check (`bun run type-check`)
+- [ ] Lint passes (`bun run lint`)
+- [ ] Behavioral/security changes have regression coverage; documentation-only changes need no artificial tests
+- [ ] Existing coverage thresholds remain satisfied
+- [ ] Documentation and `CHANGELOG.md` updated where applicable
+- [ ] `dist/` rebuilt and committed if source/declarations changed (`bun run build`)
 
-- [ ] Tests pass (`npm test`) -- yes, all of them
-- [ ] Types check (`npm run type-check`) -- TypeScript is not optional here
-- [ ] Lint passes (`npm run lint`) -- Biome has no feelings to hurt
-- [ ] New code has tests (I will notice if it doesn't)
-- [ ] Coverage stays above 90% (I don't make the rules -- actually I do)
-- [ ] Docs updated (if applicable, which it probably is, which you probably skipped)
-- [ ] `CHANGELOG.md` updated (future you will thank present you)
+## Migration or compatibility impact
 
-## Proof of life
+<!-- Include any required schema migration, changed defaults or integration limits. -->
 
-<!-- How did you test this? "It works on my machine" is not a testing strategy. -->
-
-## Relevant wreckage
-
-<!-- Link related issues: Fixes #123, Closes #456 -->
+Report undisclosed security vulnerabilities through the private channel in [SECURITY.md](../SECURITY.md), not a public PR.

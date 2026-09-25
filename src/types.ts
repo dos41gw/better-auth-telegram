@@ -187,7 +187,7 @@ export interface TelegramPluginOptions {
 
   /**
    * Maximum age of auth_date in seconds
-   * Prevents replay attacks
+   * Bounds the replay window; valid payloads can be reused within this lifetime.
    * @default 86400 (24 hours)
    */
   maxAuthAge?: number;
@@ -203,10 +203,9 @@ export interface TelegramPluginOptions {
     enabled?: boolean;
 
     /**
-     * Validate initData from Mini Apps
+     * @deprecated Verification is mandatory. Setting false throws during initialization.
      * @default true
      */
-    /** @deprecated Verification is mandatory. Setting false throws during initialization. */
     validateInitData?: boolean;
 
     /**
@@ -234,9 +233,9 @@ export interface TelegramPluginOptions {
   oidc?: TelegramOIDCOptions;
 
   /**
-   * Enable Telegram test server mode.
-   * When enabled, the client widget will use Telegram's test environment.
-   * HMAC verification works identically — only the bot token differs.
+   * Expose test-mode metadata in the public config response.
+   * Current Widget helpers do not switch Telegram endpoints based on this flag.
+   * HMAC verification still requires the token for the issuing bot.
    * Note: OIDC (oauth.telegram.org) has no documented test variant;
    * a warning is logged if both testMode and oidc are enabled.
    * @default false

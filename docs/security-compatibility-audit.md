@@ -19,6 +19,10 @@ Reviewed against Better Auth 1.7.0 and 1.7.6 on 2026-09-25. This is a code revie
 | OIDC identity/tokens | 1.7 provider API mismatch, previously fixed in 3.0 | Stable verified `sub`, `accountSubject`, ID-token verification on both callback and direct-token paths, issuer/audience/expiry/issued-at/nonce checks |
 | OAuth options | Wrapper omitted newer parameters/policies | Native signup restrictions, ID-token disable switch, email policy, optional nonce, loginHint, scopes and additional parameters/data |
 
+## Documentation follow-up
+
+The [current security guide](security.md) corrects inherited claims about one-time replay prevention, always-on rate limits, and automatic cookie/claim handling. Better Auth already provides the relevant session/CSRF/rate-limit machinery; no parallel security layer was added. `testMode` is currently metadata, not a Widget endpoint switch. Core OIDC mapping filters `input:false` fields, including the plugin-owned phone field.
+
 ## Compatibility boundaries
 
 - Verified: Widget, Mini App and OIDC callback/direct-token authentication; existing account reuse; PKCE/state and nonce; database hook vetoes and SQL rollback; user validation; admin bans; private additional fields; secondary-storage sessions; custom-session output through `getSession`; link/unlink policies; cookie-cache revocation/freshness; origin checks and rate limits; real client session notifications.

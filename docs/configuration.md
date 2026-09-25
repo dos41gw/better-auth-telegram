@@ -1,233 +1,89 @@
 # Configuration
 
-Everything you can tweak, nothing you can't. No database adapters, no session philosophy, no framework tours -- that's [Better Auth's job](https://www.better-auth.com/docs). This page is strictly about what `better-auth-telegram` gives you to misconfigure.
+These options belong to `telegram(...)`. Database adapters, cookies, rate limits, trusted origins and framework CORS belong to Better Auth or your hosting framework.
 
-## Server Configuration
+## Server options
 
-### Login Widget Minimum
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `botToken` | unset | Required by enabled HMAC flows; keep server-side |
+| `botUsername` | unset | Required for rendering the Widget, without `@` |
+| `loginWidget` | `true` | Registers Widget sign-in/link/unlink |
+| `miniApp.enabled` | `false` | Registers Mini App sign-in/validation |
+| `oidc.enabled` | `false` | Injects native `telegram-oidc` social provider |
+| `autoCreateUser` | `true` | Allows HMAC signup; `false` also sets OIDC `disableSignUp` |
+| `allowUserToLink` | `true` | Allows custom Widget linking, unless core account linking is disabled |
+| `maxAuthAge` | `86400` | Positive finite HMAC payload lifetime in seconds, not one-time replay protection |
+| `mapTelegramDataToUser` | name/image mapping | Synchronous mapping from verified Widget data |
+| `miniApp.mapMiniAppDataToUser` | name/image mapping | Synchronous mapping from verified Mini App user |
+| `miniApp.allowAutoSignin` | `true` | Allows Mini App signup only when `autoCreateUser` is also true; existing accounts can still sign in |
+| `miniApp.validateInitData` | `true` | Deprecated switch; verification is mandatory and `false` throws |
+| `testMode` | `false` | Returned as configuration metadata; warns when combined with OIDC. Current Widget helpers do not switch Telegram endpoints based on this flag |
 
-The default enables the Login Widget, so it needs the bot token and username when that flow is used.
+Missing flow credentials log setup warnings and fail closed when the flow is used. Invalid `maxAuthAge`, `jwksFetchTimeoutMs`, or `validateInitData:false` throws during initialization.
 
-```typescript
-import { betterAuth } from "better-auth";
-import { telegram } from "better-auth-telegram";
+## OIDC options
 
-export const auth = betterAuth({
-  database: /* your database config */,
-  plugins: [
-    telegram({
-      botToken: process.env.TELEGRAM_BOT_TOKEN!,
-      botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-    }),
-  ],
-});
-```
-
-### Full Options Reference
-
-Every option, every default, no surprises (for once).
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `botToken` | `string` | `undefined` | Required at runtime by enabled Login Widget and Mini App flows for HMAC verification. OIDC can use an explicit `oidc.clientId` and `oidc.clientSecret` instead. |
-| `botUsername` | `string` | `undefined` | Required only when the Login Widget is rendered. Bot username without the `@`. |
-| `allowUserToLink` | `boolean` | `true` | Let users link Telegram to an existing account. |
-| `autoCreateUser` | `boolean` | `true` | Auto-create a user on first sign-in. Set to `false` if you enjoy gatekeeping. |
-| `maxAuthAge` | `number` | `86400` | How many seconds old the auth data can be before we reject it. 86400 = 24 hours. Prevents replay attacks from time travellers. |
-| `mapTelegramDataToUser` | `function` | see below | Custom mapping from Telegram data to your user object. |
-| `miniApp` | `object` | see below | Mini App configuration. Disabled by default because not everyone lives inside Telegram. |
-| `oidc` | `object` | see below | Telegram OIDC configuration. Also disabled by default. |
-| `testMode` | `boolean` | `false` | Enable Telegram test server mode. The widget uses the test environment; HMAC verification stays the same. See [Test Server Mode](#test-server-mode). |
-
-### Default User Mapping
-
-By default, the plugin maps `first_name` + `last_name` to `name`. Not `username` -- actual human names. Radical concept.
-
-```typescript
-// What happens when you don't provide mapTelegramDataToUser
-{
-  name: data.last_name
-    ? `${data.first_name} ${data.last_name}`
-    : data.first_name,
-  image: data.photo_url,
-  email: undefined,  // Telegram doesn't do email. Cope.
-}
-```
-
-### Custom User Mapping
-
-Override the default with `mapTelegramDataToUser`. You get the raw `TelegramAuthData` and return whatever you want:
-
-```typescript
-telegram({
-  botToken: process.env.TELEGRAM_BOT_TOKEN!,
-  botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-  mapTelegramDataToUser: (data) => ({
-    name: data.username || data.first_name,
-    image: data.photo_url,
-    email: undefined,
-    // Throw in whatever custom fields your schema supports
-    metadata: {
-      telegramId: data.id.toString(),
-      authenticatedVia: "telegram",
-    },
-  }),
-})
-```
-
-The `data` parameter is a `TelegramAuthData` object: `id`, `first_name`, `last_name?`, `username?`, `photo_url?`, `auth_date`, `hash`.
-
-### Mini App Configuration
-
-For when your app lives inside Telegram itself. Disabled by default.
-
-```typescript
-telegram({
-  botToken: process.env.TELEGRAM_BOT_TOKEN!,
-  miniApp: {
-    enabled: true,
-    validateInitData: true,
-    allowAutoSignin: true,
-    mapMiniAppDataToUser: (user) => ({
-      name: `${user.first_name} ${user.last_name || ""}`.trim(),
-      image: user.photo_url,
-      email: undefined,
-    }),
-  },
-})
-```
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Turn on Mini App endpoints (`/telegram/miniapp/signin`, `/telegram/miniapp/validate`). |
-| `validateInitData` | `boolean` | `true` | Verify the HMAC signature on `initData`. Only set to `false` if you enjoy security incidents. |
-| `allowAutoSignin` | `boolean` | `true` | Auto-create users from Mini App sign-ins. Works in tandem with `autoCreateUser` -- both must be `true` for new users to be created. |
-| `mapMiniAppDataToUser` | `function` | same as login widget | Custom mapping from `TelegramMiniAppUser` to your user object. Gets `id`, `first_name`, `last_name?`, `username?`, `photo_url?`, `language_code?`, `is_premium?`, `allows_write_to_pm?`. |
-
-### OIDC Configuration
-
-Standard OAuth 2.0 Authorization Code flow with PKCE via `oauth.telegram.org`. Phone numbers and JWKS-verified JWTs without the legacy Widget callback. Disabled by default.
-
-```typescript
+```ts
 telegram({
   loginWidget: false,
   oidc: {
     enabled: true,
     clientId: process.env.TELEGRAM_OIDC_CLIENT_ID!,
     clientSecret: process.env.TELEGRAM_OIDC_CLIENT_SECRET!,
-    requestPhone: true,        // get phone numbers via the `phone` scope
-    requestBotAccess: false,   // request bot access via `telegram:bot_access` scope
-    scopes: ["openid", "profile"],  // default scopes
-    mapOIDCProfileToUser: (claims) => ({
-      name: `${claims.name}`,
-      image: claims.picture,
-      telegramPhoneNumber: claims.phone_number,
-    }),
+    disableIdTokenSignIn: true, // Example: allow redirect login only.
   },
-})
-```
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Turn on Telegram OIDC. Injects a `telegram-oidc` provider into Better Auth's social login system via the `init` hook. |
-| `clientId` | `string` | bot ID from `botToken` | Client ID from BotFather Web Login. Required when `botToken` is omitted. |
-| `clientSecret` | `string` | `botToken` compatibility fallback | Client Secret from BotFather Web Login. The bot-token fallback is retained for backward compatibility, but Telegram's official OIDC flow requires the Web Login Client Secret. |
-| `scopes` | `string[]` | `["openid", "profile"]` | OIDC scopes to request. `openid` is always included regardless. |
-| `requestPhone` | `boolean` | `false` | Add the `phone` scope. Read `claims.phone_number` in `mapOIDCProfileToUser` to persist it. |
-| `requestBotAccess` | `boolean` | `false` | Add the `telegram:bot_access` scope. Lets your bot send messages to the user. |
-| `mapOIDCProfileToUser` | `function` | uses `name` + `picture` from claims | Custom mapping from `TelegramOIDCClaims` to your user object. Claims are optional except for the standard token fields; see the API reference. |
-
-OIDC uses Better Auth's built-in social login routes — no custom endpoints. The plugin injects a `telegram-oidc` provider via the `init` hook and Better Auth handles `POST /sign-in/social` and `GET /callback/telegram-oidc` automatically.
-
-Missing flow credentials produce setup warnings instead of aborting application startup. The corresponding request still fails closed if the credential is missing when the flow is used.
-
-### Test Server Mode
-
-Telegram runs a [test environment](https://core.telegram.org/bots/webapps#testing-mini-apps) -- separate bots, separate users, separate existential dread. Set `testMode: true` and the client widget will point at the test server. HMAC verification is identical; only the bot token differs (you get a test token from @BotFather's test environment).
-
-```typescript
-telegram({
-  botToken: process.env.TELEGRAM_BOT_TOKEN!,   // test env token
-  botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-  testMode: true,
-})
-```
-
-One catch: Telegram's OIDC endpoint (`oauth.telegram.org`) has no documented test variant. If you enable both `testMode` and `oidc`, the plugin logs a `console.warn` to let you know you're on your own. OIDC may not play nicely with test server bot tokens. You've been warned.
-
-### Lockdown Mode
-
-For the paranoid (read: responsible):
-
-```typescript
-telegram({
-  botToken: process.env.TELEGRAM_BOT_TOKEN!,
-  botUsername: process.env.TELEGRAM_BOT_USERNAME!,
-  autoCreateUser: false,     // No new users. Invite only vibes.
-  allowUserToLink: false,    // No linking. One identity, one account.
-  maxAuthAge: 3600,          // 1 hour. Paranoia pays off.
-})
-```
-
-## Client Configuration
-
-### Setup
-
-`telegramClient()` takes zero arguments. It just works. A concept lost on most SDKs.
-
-```typescript
-import { createAuthClient } from "better-auth/client";
-import { telegramClient } from "better-auth-telegram/client";
-
-export const authClient = createAuthClient({
-  plugins: [telegramClient()],
 });
 ```
 
-### Widget Options
+| Option within `oidc` | Default | Behavior |
+| --- | --- | --- |
+| `clientId` | ID portion of bot token | Prefer explicit Web Login Client ID |
+| `clientSecret` | bot token compatibility fallback | Configure the separate Web Login secret explicitly |
+| `scopes` | `["openid", "profile"]` | Always includes `openid`; per-request scopes are added |
+| `requestPhone` | `false` | Adds `phone`; makes consented claims available, does not persist them |
+| `requestBotAccess` | `false` | Adds `telegram:bot_access` |
+| `mapOIDCProfileToUser` | name/image mapping | Maps a verified copy of claims; cannot change account identity |
+| `jwksFetchTimeoutMs` | `10000` | Positive finite JWKS network timeout in milliseconds |
+| `disableSignUp` | core default (`false`) | Rejects new OIDC users; existing users may sign in |
+| `disableImplicitSignUp` | core default (`false`) | New users must explicitly set client `requestSignUp:true` |
+| `disableIdTokenSignIn` | core default (`false`) | Disables direct-token sign-in, keeps authorization-code login |
+| `requireEmailVerification` | core default | Core email-verification policy; Telegram's placeholder email is unverified |
+| `requireNonce` | `false` | Enables server-generated, state-bound nonce on redirect flow |
 
-When you call `initTelegramWidget`, the second argument is `TelegramWidgetOptions`:
+Telegram does not supply email; the plugin uses unverified `${sub}@telegram.oidc` placeholders for OIDC and `${numericId}@telegram.invalid` for HMAC signup. Enabling required email verification needs an application flow that establishes a real verified address. Do not treat placeholders as contact addresses or ownership proof.
 
-```typescript
-authClient.initTelegramWidget(
-  "container-id",
-  {
-    size: "large",          // "large" | "medium" | "small"
-    showUserPhoto: true,    // Show the user's profile pic on the button
-    cornerRadius: 20,       // Border radius in pixels (0-20)
-    requestAccess: false,   // Request write access to the user's DMs
-    lang: "en",             // Language code -- "en", "ru", "pl", "es", etc.
-  },
-  async (data) => {
-    await authClient.signInWithTelegram(data);
-  }
-);
+For EdDSA tokens, use `scopes:["openid"]` without extra profile/phone/bot-access requests. ES256K is unsupported. Telegram OIDC has no documented test endpoint; `testMode` does not create one. See [security](security.md#oidc) for direct-token replay and nonce limitations.
+
+## Profile mapping
+
+```ts
+telegram({
+  botToken: process.env.TELEGRAM_BOT_TOKEN!,
+  botUsername: process.env.TELEGRAM_BOT_USERNAME!,
+  mapTelegramDataToUser: (data) => ({
+    name: data.username || data.first_name,
+    image: data.photo_url,
+  }),
+});
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `size` | `"large" \| "medium" \| "small"` | `"large"` | Button size. |
-| `showUserPhoto` | `boolean` | `true` | Display the user's profile photo on the button. |
-| `cornerRadius` | `number` | `20` | Border radius in pixels. Range: 0-20. |
-| `requestAccess` | `boolean` | `false` | Request permission to DM the user. |
-| `lang` | `string` | browser default | Widget language code. |
+HMAC defaults use first/last name and photo. New HMAC users always have `emailVerified:false`; mapped IDs cannot change their identity. Returning users retain their stored profile. Additional fields must exist in your configured schema. Mapping functions are synchronous and should not perform asynchronous persistence.
 
-## Environment Variables
+OIDC uses core profile-input rules. In Better Auth 1.7.6, `input:false` additional fields are filtered from provider-profile mappings too. In particular, returning `telegramPhoneNumber` from the mapper does not populate the plugin-owned protected field. Persist sensitive claims through an explicit trusted server-side flow; do not make identity/verification fields client-writable just to bypass filtering. OIDC-only deployments declare no extra Telegram columns.
 
-The only env vars this plugin cares about:
+## Linking and validation policy
 
-```env
-TELEGRAM_BOT_TOKEN="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-TELEGRAM_BOT_USERNAME="your_bot_username"
-```
+Widget and Mini App share the numeric `telegram` account provider. OIDC uses `telegram-oidc` and its verified `sub`; the two are not automatically merged by email or metadata. Use explicit account linking while authenticated.
 
-Everything else -- `BETTER_AUTH_SECRET`, `DATABASE_URL`, your existential dread -- is between you and Better Auth.
+Custom linking requires `allowUserToLink` and core `account.accountLinking.enabled` not to be false. Native OIDC linking follows core social-account rules, not the Widget-only `allowUserToLink` switch. Link/unlink require a fresh authoritative session unless `session.freshAge` is zero. Last-account unlink needs core `allowUnlinkingAll`.
 
-Get the bot token from [@BotFather](https://t.me/BotFather). The username is whatever you named your bot, minus the `@`.
+`user.validateUserInfo` receives custom methods `telegram-widget` / `telegram-miniapp` and actions `create-user`, `sign-in`, `link-account`. OIDC uses native `oauth`. Hooks and MFA/captcha policies must account for the actual methods and paths; see [integration limits](security.md#integration-limits).
 
-## Next Steps
+## Client and Widget options
 
-- [API Reference](./api-reference.md) -- every endpoint, spelled out
-- [Mini Apps Guide](./miniapps.md) -- building inside Telegram
-- [Security](./security.md) -- the part you should actually read
-- [Troubleshooting](./troubleshooting.md) -- when it all goes sideways
+`telegramClient()` takes no options. Server settings come from the public `/telegram/config` endpoint, which never returns secrets.
+
+Widget helpers accept `size` (`large`, `medium`, `small`; default `large`), `showUserPhoto` (true), `cornerRadius` (20), `requestAccess` (false), and optional `lang`. Call helpers in the browser after the container mounts.
+
+API actions accept fetch options; DOM Widget helpers do not. `signInWithTelegramOIDC` additionally accepts native callback URLs, scopes, login hints, extra non-reserved authorization parameters, signup/redirect flags, additional state data and direct ID tokens. See the [API reference](api-reference.md#client-methods).

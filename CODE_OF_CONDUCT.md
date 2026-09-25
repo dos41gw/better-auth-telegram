@@ -28,7 +28,7 @@ I'm perfectly happy being snarky about code, build tools, and the state of the J
 
 ## Enforcement
 
-If someone is making this space hostile, report it to **hello@vcode.sh**. All reports are reviewed promptly and taken seriously.
+This policy applies to the dos41gw fork. For moderation concerns, contact the [fork maintainer](https://github.com/dos41gw) through a contact method they publish, or use GitHub's built-in abuse-reporting tools. Do not post private personal information in a public issue. The upstream author's email is not a contact address for this fork. Security vulnerabilities have a separate [private reporting channel](SECURITY.md).
 
 Consequences scale with severity: a warning, a temporary ban, or a permanent ban. I'd rather not enforce any of this. Don't make me.
 

@@ -40,7 +40,7 @@ export function TelegramLogin() {
       async (authData) => {
         const result = await authClient.signInWithTelegram(authData);
         if (result.error) {
-          setError(result.error.message);
+          setError(result.error.message || "Authentication failed");
         } else {
           router.push("/dashboard");
         }
@@ -98,22 +98,25 @@ export function TelegramLoginRedirect() {
 
 ### Step 2: Handle the Callback
 
-Create a page at your redirect URL. Parse the query params, call `signInWithTelegram`.
+Create a page at your redirect URL. Parse the query params and call `signInWithTelegram`. Signed query strings are bearer credentials: avoid proxy/access/analytics logging, use a restrictive referrer policy, and remove the query from browser history after extracting it. Native OIDC is preferable for new browser integrations.
 
 ```tsx
 // app/auth/telegram/callback/page.tsx
 "use client";
 
 import { authClient } from "@/lib/auth-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export default function TelegramCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const started = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     const authData = {
       id: Number(searchParams.get("id")),
       first_name: searchParams.get("first_name")!,
@@ -124,9 +127,10 @@ export default function TelegramCallback() {
       hash: searchParams.get("hash")!,
     };
 
+    window.history.replaceState(null, "", window.location.pathname);
     authClient.signInWithTelegram(authData).then((result) => {
       if (result.error) {
-        setError(result.error.message);
+        setError(result.error.message || "Authentication failed");
       } else {
         router.push("/dashboard");
       }
@@ -142,7 +146,7 @@ export default function TelegramCallback() {
 
 User already signed in? Let them bolt on Telegram. Same widget, different endpoint.
 
-Requires `allowUserToLink: true` on the server (it's the default, relax).
+Requires `allowUserToLink:true`, core account linking enabled, and an authoritative session fresh enough for `session.freshAge`.
 
 ```tsx
 "use client";
@@ -159,7 +163,7 @@ export function LinkTelegram() {
       { size: "medium" },
       async (authData) => {
         const result = await authClient.linkTelegram(authData);
-        setStatus(result.error ? result.error.message : "Linked.");
+        setStatus(result.error ? result.error.message || "Link failed" : "Linked.");
       }
     );
   }, []);
@@ -175,7 +179,7 @@ export function LinkTelegram() {
 
 ## Unlink Telegram Account
 
-The digital breakup. No widget needed -- just call `unlinkTelegram`.
+Call `unlinkTelegram` with a fresh authenticated session. The last account cannot be removed unless core `allowUnlinkingAll` is explicitly enabled.
 
 ```tsx
 const result = await authClient.unlinkTelegram();
@@ -201,9 +205,6 @@ telegram({
     clientId: process.env.TELEGRAM_OIDC_CLIENT_ID!,
     clientSecret: process.env.TELEGRAM_OIDC_CLIENT_SECRET!,
     requestPhone: true,  // phone numbers -- the Login Widget's biggest regret
-    mapOIDCProfileToUser: (claims) => ({
-      telegramPhoneNumber: claims.phone_number,
-    }),
   },
 });
 ```
@@ -216,19 +217,11 @@ await authClient.signInWithTelegramOIDC({
 });
 ```
 
-That's it. Better Auth's social login system handles the PKCE, state tokens, JWT verification, and callback. You don't need to think about any of it. The `telegram-oidc` provider is injected automatically via the `init` hook — no manual provider registration.
+Better Auth handles PKCE, state and callback/session processing; the plugin verifies the ID token with jose. The `telegram-oidc` provider is injected automatically via the `init` hook — no manual provider registration.
 
 ### OIDC + Phone Numbers
 
-The `phone` scope gives you what the Login Widget never could. With `requestPhone: true`, Telegram can return `phone_number` and `phone_number_verified` claims. The plugin exposes them to `mapOIDCProfileToUser`; persist the value in a field defined by your user schema.
-
-```typescript
-// With telegramPhoneNumber defined in your user schema and mapped above:
-{
-  name: "John Doe",
-  telegramPhoneNumber: "+1234567890",
-}
-```
+`requestPhone:true` requests optional `phone_number` / `phone_number_verified` claims. It does not persist them. Better Auth filters protected `input:false` fields from ordinary OIDC profile mapping; see [profile mapping](configuration.md#profile-mapping) before designing trusted persistence. OIDC `sub` and numeric Telegram `id` are different identities.
 
 ### React Example
 
@@ -277,7 +270,7 @@ const result = await authClient.validateMiniApp(
 
 ## Fetch Options
 
-Every method (except `initTelegramWidget` and `initTelegramWidgetRedirect`) accepts an optional second parameter for custom fetch options. Headers, credentials, cache control -- whatever you need.
+API actions accept optional fetch options: the second argument for sign-in/link/validate/OIDC, and the first for unlink/config/automatic Mini App sign-in. DOM Widget helpers do not accept them. Headers, credentials, cache control -- whatever you need.
 
 ```ts
 const result = await authClient.signInWithTelegram(authData, {
@@ -291,7 +284,7 @@ await authClient.unlinkTelegram({
 
 ## Error Handling
 
-Every method returns `{ data, error }`. If `error` exists, something went wrong. The `error.message` tells you what. The `error.status` tells you how bad.
+API actions normally return `{ data, error }`; DOM helpers return `Promise<void>`. If `error` exists, something went wrong. The `error.message` tells you what. The `error.status` tells you how bad.
 
 ```ts
 const result = await authClient.signInWithTelegram(authData);
@@ -305,11 +298,11 @@ if (result.error) {
 // result.data has your session
 ```
 
-No try/catch needed for normal flows -- errors come back in the result object, not thrown at your face. Network failures are the exception (pun intended).
+Handle `result.error` for ordinary HTTP failures. Transport failures, throwing fetch options and DOM/setup errors can reject and need try/catch.
 
 ## Vanilla JS
 
-No React? No problem. Same API, fewer hooks cluttering your life.
+The following module example needs a bundler or an import map for bare package imports.
 
 ```html
 <div id="telegram-login"></div>

@@ -1,88 +1,50 @@
 # Contributing
 
-You want to help build a Telegram auth plugin. Telegram, the platform where bots talk to bots about talking to bots. Sounds about right. Come on in.
+This repository is the [dos41gw fork](https://github.com/dos41gw/better-auth-telegram). Upstream history and attribution are retained; changes here target Better Auth 1.7.x.
 
-## Development Setup
+## Development setup
 
-```bash
-git clone https://github.com/vcode-sh/better-auth-telegram.git
+Use Node 24.11+ for the current build toolchain (`.nvmrc` selects Node 24) and Bun 1.4.2, matching CI. Package runtime support starts at Node 24; build-tool requirements can be stricter.
+
+```sh
+git clone https://github.com/dos41gw/better-auth-telegram.git
 cd better-auth-telegram
-npm install
+bun install --frozen-lockfile
+bun run build
 ```
-
-### Prerequisites
-
-- Node.js >= 22 (see `.nvmrc` -- yes, I pinned it, I'm not an animal)
-- npm >= 10
 
 ## Commands
 
-These are the incantations. Learn them. Love them. Run them before pushing.
-
-```bash
-npm run dev          # Watch mode build -- for the impatient
-npm run build        # Production build (ESM + CJS + DTS) -- the real thing
-npm run type-check   # TypeScript strict check -- the compiler judges you so I don't have to
-npm test             # Run all tests -- you'd be surprised how many people skip this
-npm run test:watch   # Watch mode -- for when you're in the zone
-npm run test:ui      # Vitest UI -- pretty graphs that prove you did something
-npm run test:coverage # Coverage report -- the number must go up
-npm run lint         # Biome lint check -- it has opinions and they are correct
-npm run lint:fix     # Auto-fix -- let the machine do the boring part
+```sh
+bun run dev             # tsdown watch mode; stop it when finished
+bun run type-check      # TypeScript
+bun run test            # Vitest under Node
+bun --bun run test      # Vitest under Bun
+bun run test:watch      # interactive watch mode
+bun run test:coverage   # v8 coverage
+bun run lint            # Biome
+bun run lint:fix        # Biome with fixes
+bun run build           # ESM, CJS, declarations and source maps
 ```
 
-## Project Structure
+Run one suite with `bun run test src/verify.test.ts`. There is no Vitest UI script, lint-staged hook, Ultracite wrapper, or tsup build.
 
-```
-src/
-  index.ts       Server plugin entry (endpoints, schema, hooks)
-  client.ts      Client plugin (widget init, API methods, Mini App helpers)
-  verify.ts      HMAC-SHA-256 verification via Web Crypto API
-  types.ts       TypeScript interfaces
-  constants.ts   Error codes, defaults, PLUGIN_ID
-  *.test.ts      Co-located tests
-```
+## Structure and tests
 
-## The Rules
+- `src/index.ts`: server plugin registration, conditional schema/endpoints and native OIDC provider injection.
+- `src/authentication.ts`: shared HMAC provisioning and authoritative session middleware.
+- `src/widget-endpoints.ts`, `src/miniapp-endpoints.ts`: custom HTTP routes.
+- `src/verify.ts`: Web Crypto HMAC verification; `src/oidc.ts`: jose/JWKS token verification.
+- `src/client.ts`: Widget helpers, Mini App/OIDC actions and session notifications.
+- Co-located `*.test.ts`: browser unit tests plus real Better Auth HTTP/SQLite integration. Only test helpers use Node crypto to sign fixtures.
+- `test/`: standalone Next.js/SQLite demo; follow its [README](test/README.md).
 
-Not guidelines. Not suggestions. Rules.
+Coverage thresholds are 90% statements/lines/branches and 80% functions. CI covers Better Auth 1.7.0 and 1.7.6, Bun, type checking, lint, the demo type check, and reproducible committed build output. In-memory SQLite tests do not modify a production database.
 
-1. **Tests live next to their code** as `*.test.ts` -- no hunting through a distant `__tests__` folder like it's 2017
-2. **Run `npm run lint:fix`** before committing -- Biome catches things your eyes won't
-3. **All tests must pass** with `npm test` -- a failing test suite is not a "known issue," it's a blocker
-4. **Type safety everywhere** -- no `any` at public API boundaries, this isn't JavaScript
-5. **Security first, features second** -- validate inputs, verify signatures, no shortcuts
-6. **Async verification only** -- all crypto goes through `crypto.subtle`, no synchronous `node:crypto`
-7. **Use `APIError` from `better-auth/api`** -- raw `ctx.json({ error })` died in v0.4.0, let it rest
-8. **Update CHANGELOG.md** for user-facing changes -- the changelog is a love letter to your future maintainers
+## Changes and pull requests
 
-## Testing
+Keep changes focused. Use Better Auth APIs for sessions, hooks, errors, origin checks and rate limiting instead of duplicating them. Preserve account identities, validate signatures before trusting profiles, and keep credentials out of logs. Add meaningful regressions for behavioral/security changes; documentation edits do not need artificial tests.
 
-I maintain 90%+ coverage. Not because I worship the metric, but because untested code is just a theory.
+Run relevant checks, update documentation and [CHANGELOG.md](CHANGELOG.md), rebuild and commit `dist/` when source or declarations change. Git installs depend on these committed artifacts. Open a PR against this fork's `main` describing the behavior and validation performed. Ordinary branch pushes do not publish to npm; the release workflow packages GitHub release assets when a version tag is pushed.
 
-- **Verification**: crypto tests in `verify.test.ts` -- HMAC paths, replay attacks, edge cases
-- **Server plugin**: endpoint tests in `index.test.ts` -- signin, link, unlink, config, Mini App flows
-- **Client plugin**: mock `$fetch`, test widget init and API methods in `client.test.ts`
-- **Security**: adversarial inputs, timestamp manipulation, malformed data
-
-## Pull Request Process
-
-1. Fork the repo and branch off `main` (not `develop`, not `feature-branch-from-six-months-ago`)
-2. Write tests for your new code (yes, before the PR, not "I'll add them later")
-3. Make sure absolutely everything passes:
-   ```bash
-   npm run type-check && npm test && npm run lint
-   ```
-4. Update documentation if applicable (it is applicable more often than you think)
-5. Update `CHANGELOG.md` under an `[Unreleased]` section
-6. Open a PR with a clear description -- "misc fixes" tells me nothing
-
-## Reporting Issues
-
-- **Bugs**: use the [bug report template](https://github.com/vcode-sh/better-auth-telegram/issues/new?template=bug_report.yml)
-- **Features**: use the [feature request template](https://github.com/vcode-sh/better-auth-telegram/issues/new?template=feature_request.yml)
-- **Security**: see [SECURITY.md](SECURITY.md) -- do NOT open a public issue for vulnerabilities unless you enjoy chaos
-
-## Code of Conduct
-
-There is one. It's in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The short version: don't be awful. The long version: read the file.
+Use [issues](https://github.com/dos41gw/better-auth-telegram/issues) for ordinary bugs with redacted reproductions. Follow [SECURITY.md](SECURITY.md) for vulnerabilities and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for participation rules.

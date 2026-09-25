@@ -1,4 +1,4 @@
-import { a as TelegramAuthData, t as telegram } from "./index-D2T0Jsy8.js";
+import { a as TelegramAuthData, t as telegram } from "./index-CidV5lQ5.js";
 import { BetterAuthClientPlugin } from "better-auth/client";
 //#region src/client.d.ts
 type TelegramPlugin = typeof telegram;

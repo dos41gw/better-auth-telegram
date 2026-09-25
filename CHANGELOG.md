@@ -1,5 +1,21 @@
 # Changelog
 
+Entries below 3.0.0 describe upstream releases at their original dates; their dependency ranges, setup instructions and security claims are historical, not current guidance. Use the current [security policy](SECURITY.md) and [installation guide](docs/installation.md).
+
+## Unreleased
+
+- Refresh the fork security policy and all documentation against 4.0.0 and Better Auth 1.7.6. Clarify replay windows, conditional core rate limiting, cookies/CSRF ownership, protected OIDC fields, testMode limits, and actual error/response shapes.
+- Enable GitHub private vulnerability reporting for this fork; remove upstream contact/SLA claims and stale package/tooling references.
+
+## 4.0.0 (fork) — 2026-09-25
+
+- Route HMAC provisioning through Better Auth hooks, validation, output parsers and transactions; require authoritative/fresh sessions for account mutations.
+- Require Mini App signatures, harden timestamp/input checks, use core first-login CSRF middleware, and prevent metadata-based account takeover.
+- Add unique nullable Telegram ID constraints; deployment requires an explicit reviewed migration.
+- Cache and bound JWKS verification, expose native OIDC policies/options, and refresh the client session store after custom actions.
+- Update dependencies, replace tsup with tsdown, remove unused tools and use native SQLite in the demo.
+- Validate 375 tests against Better Auth 1.7.0/1.7.6 and Bun. See the [audit and migration guide](docs/security-compatibility-audit.md).
+
 ## 3.0.0 (fork)
 
 - Support Better Auth 1.7.x using `accountSubject` and `idToken`; retain existing Telegram OIDC `sub` account IDs.

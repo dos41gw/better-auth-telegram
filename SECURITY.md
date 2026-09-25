@@ -1,36 +1,33 @@
 # Security Policy
 
+This policy applies to the [dos41gw fork](https://github.com/dos41gw/better-auth-telegram), not the upstream npm release.
+
 ## Supported Versions
 
-I only patch what's current. If you're running something older, you're on your own and I wish you well.
+| Version | Status |
+| --- | --- |
+| 4.x on Better Auth `>=1.7.0 <1.8.0` | Current maintained fork line |
+| 3.x and earlier | Upgrade using the migration guide |
 
-| Version | Supported          |
-|---------|--------------------|
-| 0.4.x   | Yes                |
-| < 0.4   | No (upgrade, mate) |
+Use the latest patched Better Auth version within the supported range. The fork is installed from GitHub; installing `better-auth-telegram` from npm alone does not install this fork. See [installation](docs/installation.md) and the [4.0 migration guide](docs/security-compatibility-audit.md#migration-from-3x).
 
-## Found a Vulnerability?
+## Reporting a Vulnerability
 
-First of all, thank you. Second of all, please do not open a public GitHub issue. I know the temptation to post "CRITICAL SECURITY FLAW" in big letters is strong, but broadcasting a vulnerability before it's patched is the infosec equivalent of leaving your front door open and tweeting your address.
+Use [GitHub private vulnerability reporting](https://github.com/dos41gw/better-auth-telegram/security/advisories/new). It is enabled for this fork. Do not put exploit details, credentials, or affected users' data in a public issue.
 
-**Email hello@vcode.sh** with:
+Include the affected commit and Better Auth version, a description, minimal reproduction, expected/actual behavior, potential impact, and a suggested fix if available. Use synthetic credentials and accounts. State whether you would like public credit.
 
-- What the vulnerability is (be specific -- "something feels off" is not actionable)
-- Steps to reproduce it
-- The potential impact (how bad could this get?)
-- A suggested fix, if you have one (I'm not proud)
+Response and patch times depend on maintainer availability; this fork does not promise a fixed response SLA. The upstream author's email address is not a reporting address for this fork.
 
-I'll acknowledge your report within 48 hours. Critical issues get patched within 7 days. I'll credit you in the release notes unless you'd prefer to remain a mysterious security benefactor.
+## Security Guarantees and Limits
 
-## What I've Already Thought About
+- Widget and Mini App signatures are verified with Web Crypto HMAC-SHA-256, using their distinct Telegram key derivations. Mini App verification cannot be disabled.
+- `auth_date` must be a positive safe integer within `maxAuthAge` (default 24 hours), with at most 30 seconds of future clock skew. This limits exposure; **it does not prevent replay within that window**. Neither the plugin nor Better Auth deduplicates these Telegram HMAC payloads.
+- OIDC tokens are verified with `jose` on both the code-callback and direct-ID-token paths. Verification checks the allowed algorithm, signature, issuer, audience, required claims, expiry, issued-at time, and an expected nonce when supplied. JWKS requests are cached and time-bounded.
+- Better Auth owns OAuth state/PKCE, session cookies, HTTP rate-limit enforcement, and core origin checks. The plugin uses its APIs and first-login CSRF middleware for custom HMAC sign-in routes. These protections depend on application configuration.
+- Link/unlink require an authoritative session and honor `session.freshAge`; setting it to zero disables the freshness requirement. Linking respects the core account-linking setting; unlinking the last account requires `allowUnlinkingAll`.
+- Telegram schema fields use `input: false`; Better Auth's parsers enforce that restriction. Database uniqueness requires the actual schema migration. Direct database writes or application-defined endpoints remain the application's responsibility.
+- User/session responses use Better Auth's output parsers. `APIError` standardizes errors, but is not itself a guarantee that custom hooks, logging, or application code cannot expose data.
+- The plugin keeps bot tokens and OIDC client secrets out of its public configuration endpoint. Signed login payloads, ID tokens, and session tokens are also credentials: do not log them.
 
-This plugin was built by someone who's read enough CVEs to develop a nervous twitch. Here's what's baked in:
-
-- **HMAC-SHA-256 via Web Crypto API** -- all verification runs through `crypto.subtle`, no synchronous fallbacks, no `node:crypto` imports. Works everywhere, trusts nothing
-- **Replay attack prevention** -- `auth_date` is validated against a configurable `maxAuthAge` (default 24h). Yesterday's auth data stays yesterday
-- **Different secret derivation paths** -- Login Widget uses `SHA256(botToken)`, Mini Apps use `HMAC-SHA256("WebAppData", botToken)`. Two doors, two keys
-- **Bot token stays server-side** -- never exposed to the client, never in responses, never in error messages. It's a secret, not a talking point
-- **Per-endpoint rate limiting** -- signin, link, unlink, validate -- all throttled. Brute-forcing was never a strategy, now it's also a slow one
-- **Input validation** -- all endpoints validate data shape before touching crypto. Garbage in, `400 BAD_REQUEST` out
-- **`input: false` on user schema fields** -- `telegramId` and `telegramUsername` can't be written to directly during signup. No creative users setting their own Telegram ID
-- **`APIError` throws** -- consistent error handling through Better Auth's pipeline. No raw JSON leaking internal state
+See [security details](docs/security.md) for rate-limit prerequisites, nonce/replay limitations, MFA/captcha integration, and the boundary between plugin and Better Auth responsibilities. The [audit report](docs/security-compatibility-audit.md) records tested versions and remaining limitations.
